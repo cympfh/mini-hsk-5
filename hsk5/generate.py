@@ -27,6 +27,7 @@ SYSTEM = (
     "You write HSK 2.0 Level 5 (五级) exam items. Use only the provided vocabulary "
     "plus allowed names 小王/小李/小张/王明/李华 and digits. Simplified Chinese. "
     "Difficulty matches official HSK5. Four choices A-D, one correct. "
+    "Each item must be a new situation, not a rewrite of a previous one. "
     "Do not include English. Output JSON that matches the schema."
 )
 
@@ -135,8 +136,16 @@ def _vocab_block(vocab: Vocab, k: int = 200) -> str:
     return "Allowed words:\n" + "、".join(sample)
 
 
-def _user(count: int, vocab: Vocab, extra: str) -> str:
-    return f"count={count}\n{_vocab_block(vocab)}\n{extra}"
+def _user(count: int, vocab: Vocab, extra: str, used: list[str] | None = None) -> str:
+    parts = [f"count={count}", _vocab_block(vocab, 80), extra]
+    if used:
+        parts.append("Do not repeat these topics or situations:\n" + "\n".join(f"- {t}" for t in used[-20:]))
+    return "\n".join(parts)
+
+
+def _theme(*parts: str) -> str:
+    blob = " ".join(p.strip() for p in parts if p and p.strip())
+    return blob[:48]
 
 
 def _text_of(model: BaseModel) -> str:
@@ -205,186 +214,186 @@ def generate_exam(exam_id: str, size: int, *, llm: LLM | None = None, report: Re
     reading: list[McqItem] = []
     sentences: list[SentenceOrderItem] = []
     essays: list[EssayItem] = []
+    used: list[str] = []
 
     def _note(label: str, detail: str = "") -> None:
         if report:
             report(label, detail)
 
-    if counts.listening_p1:
-        _note("听力 第1部分")
-        p1 = _parse(
+    for i in range(counts.listening_p1):
+        _note("听力 第1部分", f"{i + 1}/{counts.listening_p1}")
+        raw = _parse(
             llm,
-            ListeningP1Out,
-            vocab,
-            _user(counts.listening_p1, vocab, "Short two-person dialogues. One question each. Third person asks."),
-        )
-        for raw in p1.items[: counts.listening_p1]:
-            clip_id = new_id()
-            item_id = new_id()
-            lines = _lines(raw.lines)
-            clips.append(
-                ListeningClip(
-                    id=clip_id,
-                    part="p1",
-                    lines=lines,
-                    question_text=raw.question,
-                    item_ids=[item_id],
-                )
-            )
-            listening.append(
-                McqItem(
-                    id=item_id,
-                    part="listening_p1",
-                    prompt="",
-                    choices=_choices(raw.choices),
-                    answer=raw.answer,
-                    clip_id=clip_id,
-                    transcript=_transcript(lines, raw.question),
-                )
-            )
-
-    if counts.listening_p2:
-        _note("听力 第2部分")
-        p2 = _parse(
-            llm,
-            ListeningP2Out,
+            ListeningItemOut,
             vocab,
             _user(
-                counts.listening_p2,
+                1,
                 vocab,
-                "Longer clips of 4-5 sentences. Total questions across clips must equal count. Each clip 1-4 questions.",
+                "One short two-person dialogue. One question. Third person asks.",
+                used,
             ),
         )
-        remaining = counts.listening_p2
-        for raw in p2.clips:
-            if remaining <= 0:
-                break
-            clip_id = new_id()
-            qs = raw.questions[:remaining]
-            item_ids: list[str] = []
-            lines = _lines(raw.lines)
-            for q in qs:
-                item_id = new_id()
-                item_ids.append(item_id)
-                listening.append(
-                    McqItem(
-                        id=item_id,
-                        part="listening_p2",
-                        prompt="",
-                        choices=_choices(q.choices),
-                        answer=q.answer,
-                        clip_id=clip_id,
-                        transcript=_transcript(lines, q.question),
-                    )
-                )
-            clips.append(
-                ListeningClip(
-                    id=clip_id,
-                    part="p2",
-                    lines=lines,
-                    question_text=" ".join(q.question for q in qs),
-                    item_ids=item_ids,
-                )
+        clip_id = new_id()
+        item_id = new_id()
+        lines = _lines(raw.lines)
+        clips.append(
+            ListeningClip(
+                id=clip_id,
+                part="p1",
+                lines=lines,
+                question_text=raw.question,
+                item_ids=[item_id],
             )
-            remaining -= len(qs)
+        )
+        listening.append(
+            McqItem(
+                id=item_id,
+                part="listening_p1",
+                prompt="",
+                choices=_choices(raw.choices),
+                answer=raw.answer,
+                clip_id=clip_id,
+                transcript=_transcript(lines, raw.question),
+            )
+        )
+        used.append(_theme(raw.question, *(ln.text for ln in raw.lines)))
 
-    if counts.reading_p1:
-        _note("阅读 空所補充")
-        r1 = _parse(
+    for i in range(counts.listening_p2):
+        _note("听力 第2部分", f"{i + 1}/{counts.listening_p2}")
+        raw = _parse(
             llm,
-            ReadingP1Out,
+            ListeningClipOut,
             vocab,
             _user(
-                counts.reading_p1,
+                1,
                 vocab,
-                "Cloze passages. text uses ____ for each blank, in order. Total blanks = count.",
+                "One clip of 4-5 sentences (dialogue or monologue) with exactly one question.",
+                used,
             ),
         )
-        blanks_left = counts.reading_p1
-        for passage in r1.passages:
-            for blank in passage.blanks:
-                if blanks_left <= 0:
-                    break
-                reading.append(
-                    McqItem(
-                        id=new_id(),
-                        part="reading_p1",
-                        prompt="选择合适的词语填空。",
-                        passage=passage.text,
-                        choices=_choices(blank.choices),
-                        answer=blank.answer,
-                    )
-                )
-                blanks_left -= 1
-
-    if counts.reading_p2:
-        _note("阅读 短文")
-        r2 = _parse(
-            llm,
-            ReadingP2Out,
-            vocab,
-            _user(counts.reading_p2, vocab, "Short paragraphs. Choose the statement that matches."),
-        )
-        for raw in r2.items[: counts.reading_p2]:
-            reading.append(
-                McqItem(
-                    id=new_id(),
-                    part="reading_p2",
-                    prompt="选择与短文内容一致的一项。",
-                    passage=raw.text,
-                    choices=_choices(raw.choices),
-                    answer=raw.answer,
-                )
+        qs = raw.questions[:1]
+        if not qs:
+            raise RuntimeError("listening p2 missing question")
+        clip_id = new_id()
+        item_id = new_id()
+        lines = _lines(raw.lines)
+        q = qs[0]
+        clips.append(
+            ListeningClip(
+                id=clip_id,
+                part="p2",
+                lines=lines,
+                question_text=q.question,
+                item_ids=[item_id],
             )
-
-    if counts.reading_p3:
-        _note("阅读 長文")
-        r3 = _parse(
-            llm,
-            ReadingP3Out,
-            vocab,
-            _user(counts.reading_p3, vocab, "Long passages with several questions each. Total questions = count."),
         )
-        left = counts.reading_p3
-        for passage in r3.passages:
-            for q in passage.questions:
-                if left <= 0:
-                    break
-                reading.append(
-                    McqItem(
-                        id=new_id(),
-                        part="reading_p3",
-                        prompt=q.question,
-                        passage=passage.text,
-                        choices=_choices(q.choices),
-                        answer=q.answer,
-                    )
-                )
-                left -= 1
-
-    if counts.writing_p1:
-        _note("連詞成句")
-        w1 = _parse(
-            llm,
-            WritingP1Out,
-            vocab,
-            _user(
-                counts.writing_p1, vocab, "Sentence reordering. words is a shuffled list; gold is the correct sentence."
-            ),
+        listening.append(
+            McqItem(
+                id=item_id,
+                part="listening_p2",
+                prompt="",
+                choices=_choices(q.choices),
+                answer=q.answer,
+                clip_id=clip_id,
+                transcript=_transcript(lines, q.question),
+            )
         )
-        for raw in w1.items[: counts.writing_p1]:
-            sentences.append(SentenceOrderItem(id=new_id(), words=list(raw.words), gold=raw.gold))
+        used.append(_theme(q.question, *(ln.text for ln in raw.lines)))
+
+    for i in range(counts.reading_p1):
+        _note("阅读 空所補充", f"{i + 1}/{counts.reading_p1}")
+        passage = _parse(
+            llm,
+            ClozePassageOut,
+            vocab,
+            _user(1, vocab, "One short cloze passage with exactly one blank marked ____.", used),
+        )
+        if not passage.blanks:
+            raise RuntimeError("cloze missing blank")
+        blank = passage.blanks[0]
+        reading.append(
+            McqItem(
+                id=new_id(),
+                part="reading_p1",
+                prompt="选择合适的词语填空。",
+                passage=passage.text,
+                choices=_choices(blank.choices),
+                answer=blank.answer,
+            )
+        )
+        used.append(_theme(passage.text))
+
+    for i in range(counts.reading_p2):
+        _note("阅读 短文", f"{i + 1}/{counts.reading_p2}")
+        raw = _parse(
+            llm,
+            ReadingShortOut,
+            vocab,
+            _user(1, vocab, "One short paragraph. Choose the statement that matches.", used),
+        )
+        reading.append(
+            McqItem(
+                id=new_id(),
+                part="reading_p2",
+                prompt="选择与短文内容一致的一项。",
+                passage=raw.text,
+                choices=_choices(raw.choices),
+                answer=raw.answer,
+            )
+        )
+        used.append(_theme(raw.text))
+
+    for i in range(counts.reading_p3):
+        _note("阅读 長文", f"{i + 1}/{counts.reading_p3}")
+        passage = _parse(
+            llm,
+            ReadingLongOut,
+            vocab,
+            _user(1, vocab, "One longer passage with exactly one multiple-choice question.", used),
+        )
+        if not passage.questions:
+            raise RuntimeError("reading p3 missing question")
+        q = passage.questions[0]
+        reading.append(
+            McqItem(
+                id=new_id(),
+                part="reading_p3",
+                prompt=q.question,
+                passage=passage.text,
+                choices=_choices(q.choices),
+                answer=q.answer,
+            )
+        )
+        used.append(_theme(q.question, passage.text))
+
+    for i in range(counts.writing_p1):
+        _note("連詞成句", f"{i + 1}/{counts.writing_p1}")
+        raw = _parse(
+            llm,
+            SentenceOut,
+            vocab,
+            _user(1, vocab, "One sentence-reordering item. words is shuffled; gold is the correct sentence.", used),
+        )
+        sentences.append(SentenceOrderItem(id=new_id(), words=list(raw.words), gold=raw.gold))
+        used.append(_theme(raw.gold))
 
     if counts.writing_p2 >= 1:
-        _note("作文の課題")
-        kw = _parse(llm, KeywordsOut, vocab, _user(5, vocab, "Five related HSK5 words for an 80-character essay."))
+        _note("作文の課題", "1/2" if counts.writing_p2 >= 2 else "1/1")
+        kw = _parse(
+            llm,
+            KeywordsOut,
+            vocab,
+            _user(5, vocab, "Five related HSK5 words for an 80-character essay.", used),
+        )
         essays.append(EssayItem(id=new_id(), kind="keywords", required_words=list(kw.words)[:5]))
+        used.append(_theme(*kw.words))
     if counts.writing_p2 >= 2:
+        _note("作文の課題", "2/2")
         pic = _parse(
             llm,
             PictureOut,
             vocab,
-            _user(1, vocab, "English photo prompt of a simple everyday scene. No text in the image."),
+            _user(1, vocab, "English photo prompt of a simple everyday scene. No text in the image.", used),
         )
         essays.append(EssayItem(id=new_id(), kind="picture", image_prompt=pic.prompt, image_name="writing.png"))
 

@@ -36,11 +36,15 @@ def _lines() -> list[dict[str, str]]:
 
 def payload_for(name: str, user: str) -> dict[str, Any]:
     n = _count(user)
+    if name == "ListeningItemOut":
+        return {"lines": _lines(), "question": "她要做什么？", **_mcq()}
     if name == "ListeningP1Out":
-        items = []
-        for _ in range(n):
-            items.append({"lines": _lines(), "question": "她要做什么？", **_mcq()})
-        return {"items": items}
+        return {"items": [{"lines": _lines(), "question": "她要做什么？", **_mcq()} for _ in range(n)]}
+    if name == "ListeningClipOut":
+        return {
+            "lines": _lines() + [{"speaker": "M1", "text": "好的，我们一起去。"}],
+            "questions": [{"question": "我们要去哪里？", **_mcq()}],
+        }
     if name == "ListeningP2Out":
         clips = []
         left = n
@@ -50,15 +54,23 @@ def payload_for(name: str, user: str) -> dict[str, Any]:
             clips.append({"lines": _lines() + [{"speaker": "M1", "text": "好的，我们一起去。"}], "questions": qs})
             left -= qn
         return {"clips": clips}
+    if name == "ClozePassageOut":
+        return {"text": "李华今天去学校学习____。", "blanks": [{**_mcq()}]}
     if name == "ReadingP1Out":
         blanks = [{**_mcq()} for _ in range(n)]
-        holes = "____，".join([""] * n) + "____。" if n else ""
         text = "李华今天去学校" + ("学习____。" if n else "学习。")
         if n > 1:
             text = "李华今天去学校" + ("____" * n) + "。"
         return {"passages": [{"text": text, "blanks": blanks}]}
+    if name == "ReadingShortOut":
+        return {"text": "李华很喜欢在图书馆看书。", **_mcq()}
     if name == "ReadingP2Out":
         return {"items": [{"text": "李华很喜欢在图书馆看书。", **_mcq()} for _ in range(n)]}
+    if name == "ReadingLongOut":
+        return {
+            "text": "现在有人喜欢在家里工作。可以节省时间。",
+            "questions": [{"question": "文章的主要内容是什么？", **_mcq()}],
+        }
     if name == "ReadingP3Out":
         return {
             "passages": [
@@ -68,6 +80,10 @@ def payload_for(name: str, user: str) -> dict[str, Any]:
                 }
             ]
         }
+    if name == "SentenceOut":
+        gold = "我今天坐公共汽车去学校。"
+        words = ["我", "今天", "坐", "公共汽车", "去", "学校"]
+        return {"words": list(reversed(words)), "gold": gold}
     if name == "WritingP1Out":
         gold = "我今天坐公共汽车去学校。"
         words = ["我", "今天", "坐", "公共汽车", "去", "学校"]

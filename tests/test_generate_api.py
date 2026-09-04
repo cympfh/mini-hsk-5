@@ -56,9 +56,7 @@ def test_jobs_emits_progress_labels(data_dir: object, stub: StubXAI, monkeypatch
     labels: list[str] = []
     orig = store.set_progress_state
 
-    def wrapped(
-        exam_id: str, *, index: int, total: int, label: str, steps: list[str], detail: str = ""
-    ) -> None:
+    def wrapped(exam_id: str, *, index: int, total: int, label: str, steps: list[str], detail: str = "") -> None:
         labels.append(label)
         orig(exam_id, index=index, total=total, label=label, steps=steps, detail=detail)
 
@@ -145,15 +143,27 @@ def test_submit_scores_and_best(client: TestClient, stub: StubXAI) -> None:
     assert public["status"] == "ready"
 
 
+def test_each_question_is_own_llm_call(stub: StubXAI, data_dir: object) -> None:
+    from hsk5.generate import generate_exam
+
+    exam = generate_exam("abcd1234", 10)
+    assert stub.schema_calls.count("ListeningItemOut") == exam.counts.listening_p1
+    assert stub.schema_calls.count("ListeningClipOut") == exam.counts.listening_p2
+    assert stub.schema_calls.count("ClozePassageOut") == exam.counts.reading_p1
+    assert stub.schema_calls.count("ReadingShortOut") == exam.counts.reading_p2
+    assert stub.schema_calls.count("ReadingLongOut") == exam.counts.reading_p3
+    assert stub.schema_calls.count("SentenceOut") == exam.counts.writing_p1
+
+
 def test_oov_retry_uses_second_generation(data_dir: object) -> None:
     stub = StubXAI()
-    stub.fail_first.add("ListeningP1Out")
+    stub.fail_first.add("ListeningItemOut")
     set_http_client(stub)
     from hsk5.generate import generate_exam
 
     exam = generate_exam("abcd1234", 10)
     assert exam.listening
-    assert stub.schema_calls.count("ListeningP1Out") >= 2
+    assert stub.schema_calls.count("ListeningItemOut") >= 2
     set_http_client(None)
 
 
