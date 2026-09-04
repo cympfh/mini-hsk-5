@@ -2,6 +2,10 @@ TODO.md
 Plan.md
 ARCH.md
 
+# runtime exam data
+data/exams/
+data/app.db
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

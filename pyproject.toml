@@ -1,7 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "mini-hsk-5"
 version = "0.1.0"
-description = "Add your description here"
+description = "HSK 2.0 level-5 mock exams generated and scored with Grok"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "fastapi>=0.115",
+    "httpx>=0.27",
+    "pydantic>=2.10",
+    "uvicorn[standard]>=0.32",
+]
+
+[dependency-groups]
+dev = [
+    "black>=25",
+    "pytest>=8",
+    "ty>=0.0.1",
+]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.black]
+line-length = 120
+target-version = ["py313"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["hsk5"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

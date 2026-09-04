@@ -1,0 +1,9 @@
+.venv
+.git
+data/exams
+data/app.db
+tests
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
