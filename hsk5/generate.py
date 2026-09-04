@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Literal, Protocol, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -16,11 +17,12 @@ from hsk5.models import (
     SentenceOrderItem,
     SpeakerLine,
 )
-from hsk5.scale import scale_counts
+from hsk5.scale import PartCounts, scale_counts
 from hsk5.store import now_iso
 from hsk5.vocab import Vocab, load_vocab
 
 T = TypeVar("T", bound=BaseModel)
+ReportFn = Callable[[str, str], None]
 SYSTEM = (
     "You write HSK 2.0 Level 5 (五级) exam items. Use only the provided vocabulary "
     "plus allowed names 小王/小李/小张/王明/李华 and digits. Simplified Chinese. "
@@ -169,7 +171,31 @@ def _transcript(lines: list[SpeakerLine], question: str) -> str:
     return body + f"\nNARR: {question}"
 
 
-def generate_exam(exam_id: str, size: int, *, llm: LLM | None = None) -> Exam:
+def planned_steps(counts: PartCounts) -> list[str]:
+    steps: list[str] = []
+    if counts.listening_p1:
+        steps.append("听力 第1部分")
+    if counts.listening_p2:
+        steps.append("听力 第2部分")
+    if counts.reading_p1:
+        steps.append("阅读 空所補充")
+    if counts.reading_p2:
+        steps.append("阅读 短文")
+    if counts.reading_p3:
+        steps.append("阅读 長文")
+    if counts.writing_p1:
+        steps.append("連詞成句")
+    if counts.writing_p2:
+        steps.append("作文の課題")
+    if counts.listening_total:
+        steps.append("音声合成")
+    if counts.writing_p2 >= 2:
+        steps.append("看图の画像")
+    steps.append("保存")
+    return steps
+
+
+def generate_exam(exam_id: str, size: int, *, llm: LLM | None = None, report: ReportFn | None = None) -> Exam:
     llm = llm or GrokLLM()
     vocab = load_vocab()
     counts = scale_counts(size)
@@ -180,7 +206,12 @@ def generate_exam(exam_id: str, size: int, *, llm: LLM | None = None) -> Exam:
     sentences: list[SentenceOrderItem] = []
     essays: list[EssayItem] = []
 
+    def _note(label: str, detail: str = "") -> None:
+        if report:
+            report(label, detail)
+
     if counts.listening_p1:
+        _note("听力 第1部分")
         p1 = _parse(
             llm,
             ListeningP1Out,
@@ -213,6 +244,7 @@ def generate_exam(exam_id: str, size: int, *, llm: LLM | None = None) -> Exam:
             )
 
     if counts.listening_p2:
+        _note("听力 第2部分")
         p2 = _parse(
             llm,
             ListeningP2Out,
@@ -257,6 +289,7 @@ def generate_exam(exam_id: str, size: int, *, llm: LLM | None = None) -> Exam:
             remaining -= len(qs)
 
     if counts.reading_p1:
+        _note("阅读 空所補充")
         r1 = _parse(
             llm,
             ReadingP1Out,
@@ -285,6 +318,7 @@ def generate_exam(exam_id: str, size: int, *, llm: LLM | None = None) -> Exam:
                 blanks_left -= 1
 
     if counts.reading_p2:
+        _note("阅读 短文")
         r2 = _parse(
             llm,
             ReadingP2Out,
@@ -304,6 +338,7 @@ def generate_exam(exam_id: str, size: int, *, llm: LLM | None = None) -> Exam:
             )
 
     if counts.reading_p3:
+        _note("阅读 長文")
         r3 = _parse(
             llm,
             ReadingP3Out,
@@ -328,6 +363,7 @@ def generate_exam(exam_id: str, size: int, *, llm: LLM | None = None) -> Exam:
                 left -= 1
 
     if counts.writing_p1:
+        _note("連詞成句")
         w1 = _parse(
             llm,
             WritingP1Out,
@@ -340,6 +376,7 @@ def generate_exam(exam_id: str, size: int, *, llm: LLM | None = None) -> Exam:
             sentences.append(SentenceOrderItem(id=new_id(), words=list(raw.words), gold=raw.gold))
 
     if counts.writing_p2 >= 1:
+        _note("作文の課題")
         kw = _parse(llm, KeywordsOut, vocab, _user(5, vocab, "Five related HSK5 words for an 80-character essay."))
         essays.append(EssayItem(id=new_id(), kind="keywords", required_words=list(kw.words)[:5]))
     if counts.writing_p2 >= 2:
@@ -372,8 +409,11 @@ def generate_exam(exam_id: str, size: int, *, llm: LLM | None = None) -> Exam:
     )
 
 
-def attach_media(exam: Exam) -> None:
-    for clip in exam.clips:
+def attach_media(exam: Exam, report: ReportFn | None = None) -> None:
+    nclips = len(exam.clips)
+    for i, clip in enumerate(exam.clips, 1):
+        if report:
+            report("音声合成", f"{i}/{nclips}")
         spoken = [ln.text for ln in clip.lines]
         if clip.question_text:
             spoken.append(clip.question_text)
@@ -383,6 +423,8 @@ def attach_media(exam: Exam) -> None:
         store.audio_path(exam.id, clip.id).write_bytes(audio)
     for essay in exam.essays:
         if essay.kind == "picture":
+            if report:
+                report("看图の画像", "")
             prompt = essay.image_prompt or "Photorealistic candid photo of two people talking in a city park, no text"
             blob = imagine.generate_image(prompt)
             if len(blob) < 32:

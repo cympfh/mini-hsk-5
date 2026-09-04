@@ -80,10 +80,48 @@ def create_exam_row(exam_id: str, size: int) -> None:
     exam_dir(exam_id)
 
 
+def parse_progress(raw: str | None) -> dict[str, Any] | None:
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        data = None
+    if isinstance(data, dict) and "label" in data:
+        return data
+    return {"label": raw, "index": 0, "total": 1, "pct": 0, "steps": [], "detail": ""}
+
+
 def set_progress(exam_id: str, progress: str) -> None:
     with _connect() as conn:
         conn.execute("UPDATE exams SET progress = ? WHERE id = ?", (progress, exam_id))
         conn.commit()
+
+
+def set_progress_state(
+    exam_id: str,
+    *,
+    index: int,
+    total: int,
+    label: str,
+    steps: list[str],
+    detail: str = "",
+) -> None:
+    pct = 0 if total <= 0 else min(99, int(100 * max(index, 0) / total))
+    set_progress(
+        exam_id,
+        json.dumps(
+            {
+                "index": index,
+                "total": total,
+                "label": label,
+                "detail": detail,
+                "pct": pct,
+                "steps": steps,
+            },
+            ensure_ascii=False,
+        ),
+    )
 
 
 def set_status(exam_id: str, status: str, error: str | None = None) -> None:
@@ -121,7 +159,7 @@ def list_exams() -> list[dict[str, Any]]:
             "size": r["size"],
             "created_at": r["created_at"],
             "status": r["status"],
-            "progress": r["progress"],
+            "progress": parse_progress(r["progress"]),
             "best_total": r["best_total"],
             "best_at": r["best_at"],
             "error": r["error"],

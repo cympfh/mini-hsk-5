@@ -26,6 +26,50 @@ def _keys(obj: Any) -> set[str]:
     return found
 
 
+def test_progress_state_on_generating_exam(client: TestClient, stub: StubXAI) -> None:
+    from hsk5 import store
+
+    store.create_exam_row("abcd1234", 10)
+    store.set_progress_state(
+        "abcd1234",
+        index=3,
+        total=8,
+        label="阅读 短文",
+        steps=["听力 第1部分", "听力 第2部分", "阅读 短文"],
+        detail="",
+    )
+    data = client.get("/api/exams/abcd1234").json()
+    assert data["status"] == "generating"
+    assert data["progress"]["label"] == "阅读 短文"
+    assert data["progress"]["index"] == 3
+    assert data["progress"]["total"] == 8
+    assert data["progress"]["pct"] == 37
+    listing = client.get("/api/exams").json()
+    row = next(x for x in listing if x["id"] == "abcd1234")
+    assert row["progress"]["label"] == "阅读 短文"
+
+
+def test_jobs_emits_progress_labels(data_dir: object, stub: StubXAI, monkeypatch: pytest.MonkeyPatch) -> None:
+    from hsk5 import generate, jobs, store
+    from hsk5.scale import scale_counts
+
+    labels: list[str] = []
+    orig = store.set_progress_state
+
+    def wrapped(
+        exam_id: str, *, index: int, total: int, label: str, steps: list[str], detail: str = ""
+    ) -> None:
+        labels.append(label)
+        orig(exam_id, index=index, total=total, label=label, steps=steps, detail=detail)
+
+    monkeypatch.setattr(store, "set_progress_state", wrapped)
+    store.create_exam_row("abcd1234", 10)
+    jobs.run_generate("abcd1234", 10)
+    steps = generate.planned_steps(scale_counts(10))
+    for step in steps:
+        assert step in labels, step
+
+
 def test_create_exam_returns_generating_then_ready(client: TestClient, stub: StubXAI) -> None:
     r = client.post("/api/exams", json={"size": 10})
     assert r.status_code == 200

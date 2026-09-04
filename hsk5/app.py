@@ -115,7 +115,7 @@ def get_exam(exam_id: str) -> JSONResponse:
                 "id": exam_id,
                 "size": row["size"],
                 "status": row["status"],
-                "progress": row["progress"],
+                "progress": store.parse_progress(row["progress"]),
                 "error": row["error"],
                 "created_at": row["created_at"],
             }

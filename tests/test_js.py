@@ -24,6 +24,8 @@ def test_no_frontend_frameworks() -> None:
     assert "cdn" not in html.lower()
     assert "試験開始" in js
     assert "data-start" in js
+    assert "gen-elapsed" in js
+    assert "bar" in (TEMPLATES / "app.css").read_text()
 
 
 def test_app_js_runs_in_window() -> None:

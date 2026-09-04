@@ -84,27 +84,46 @@
       }).then(function (j) {
         state.view = "generating";
         state.pending = j.id;
+        state.progress = { label: "準備", pct: 0, index: 0, total: 1, steps: [], detail: "" };
+        state.genStarted = Date.now();
+        if (state.genTick) global.clearInterval(state.genTick);
+        state.genTick = global.setInterval(function () {
+          var el = $("#gen-elapsed");
+          if (el) el.textContent = clock(Math.floor((Date.now() - state.genStarted) / 1000));
+        }, 500);
         render();
         poll(j.id);
       });
     }
 
+    function stopGenTick() {
+      if (state.genTick) {
+        global.clearInterval(state.genTick);
+        state.genTick = null;
+      }
+    }
+
     function poll(id) {
       api("/api/exams/" + id).then(function (j) {
         if (j.status === "ready") {
+          stopGenTick();
           state.view = "list";
           loadList();
           return;
         }
         if (j.status === "failed") {
+          stopGenTick();
           state.view = "list";
-          state.error = j.error || "生成失败";
+          state.error = j.error || "生成に失敗した";
           loadList();
           return;
         }
-        state.progress = j.progress;
+        if (j.progress && typeof j.progress === "object") state.progress = j.progress;
+        else if (typeof j.progress === "string") state.progress = { label: j.progress, pct: 0, steps: [] };
         render();
-        global.setTimeout(function () { poll(id); }, 800);
+        global.setTimeout(function () { poll(id); }, 700);
+      }).catch(function () {
+        global.setTimeout(function () { poll(id); }, 1500);
       });
     }
 
@@ -168,7 +187,10 @@
         if (e.status === "ready") {
           action = "<button class=\"primary start-btn\" data-start=\"" + e.id + "\">試験開始</button>";
         } else if (e.status === "generating") {
-          action = "<p class=\"hint\">生成中… " + (e.progress || "") + "</p>";
+          var p = e.progress && typeof e.progress === "object" ? e.progress : null;
+          var lab = p ? (p.label || "") + (p.detail ? " " + p.detail : "") : "";
+          var pct = p && p.pct != null ? p.pct : 0;
+          action = "<div class=\"bar\"><span style=\"width:" + pct + "%\"></span></div><p class=\"hint\">生成中 " + pct + "%　" + lab + "</p>";
         } else {
           action = "<p class=\"hint\">生成失敗" + (e.error ? "（" + e.error + "）" : "") + "。上から作り直す。</p>";
         }
@@ -192,7 +214,22 @@
     }
 
     function renderGenerating() {
-      root.innerHTML = "<div class=\"admit\"><span>生成中</span><strong>" + (state.pending || "") + "</strong></div><p>問題を作っている。数分かかることがある。</p><p class=\"hint\">" + (state.progress || "") + "</p>";
+      var p = state.progress || {};
+      var pct = p.pct != null ? p.pct : 0;
+      var elapsed = state.genStarted ? clock(Math.floor((Date.now() - state.genStarted) / 1000)) : "00:00";
+      var steps = p.steps || [];
+      var cur = p.label || "準備";
+      var list = steps.map(function (s, i) {
+        var mark = i < (p.index || 0) - 1 ? "済" : (s === cur ? "今" : "　");
+        var cls = s === cur ? " class=\"now\"" : "";
+        return "<li" + cls + "><span class=\"st\">" + mark + "</span>" + s + "</li>";
+      }).join("");
+      root.innerHTML =
+        "<div class=\"admit\"><span>生成中　" + (state.pending || "") + "</span><strong id=\"gen-elapsed\">" + elapsed + "</strong></div>" +
+        "<p class=\"now-label\">いま: " + cur + (p.detail ? "（" + p.detail + "）" : "") + "</p>" +
+        "<div class=\"bar big\"><span style=\"width:" + pct + "%\"></span></div>" +
+        "<p class=\"hint\">" + pct + "%　Grok が問題を書いている。数分かかることがある。</p>" +
+        (list ? "<ol class=\"steps\">" + list + "</ol>" : "");
     }
 
     function bubbles(item) {
