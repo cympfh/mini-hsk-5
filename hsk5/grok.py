@@ -5,6 +5,7 @@ import json
 import os
 from typing import Any, TypeVar
 
+import httpx
 from pydantic import BaseModel
 
 from hsk5.http import get_http_client
@@ -42,8 +43,24 @@ def parse(model_type: type[T], system: str, user: str, *, image: bytes | None = 
         },
     }
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-    resp = get_http_client().post(CHAT_URL, json=body, headers=headers)
-    resp.raise_for_status()
+    last_err: Exception | None = None
+    resp = None
+    for _attempt in range(3):
+        try:
+            r = get_http_client().post(CHAT_URL, json=body, headers=headers)
+            r.raise_for_status()
+            resp = r
+            break
+        except httpx.TimeoutException as e:
+            last_err = e
+            continue
+        except httpx.HTTPStatusError as e:
+            last_err = e
+            if e.response is not None and e.response.status_code >= 500:
+                continue
+            raise GrokError("grok request failed") from e
+    if resp is None:
+        raise GrokError("grok request failed") from last_err
     data = resp.json()
     try:
         content = data["choices"][0]["message"]["content"]

@@ -122,16 +122,23 @@ button.primary {
 
 button:disabled { opacity: 0.45; cursor: not-allowed; }
 
-table.exams {
-  width: 100%;
-  border-collapse: collapse;
+.exam-card {
+  border: 1px solid #111;
+  padding: 12px 14px;
+  margin: 12px 0;
+}
+
+.exam-meta, .exam-score {
+  margin: 0 0 6px;
   font-size: 14px;
 }
 
-table.exams th, table.exams td {
-  border-bottom: 1px solid var(--rule);
-  text-align: left;
-  padding: 8px 6px;
+.start-btn {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  font-size: 16px;
+  padding: 12px 14px;
 }
 
 .timer {

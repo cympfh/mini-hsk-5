@@ -28,4 +28,4 @@ def set_http_client(client: HttpClient | None) -> None:
 def get_http_client() -> HttpClient:
     if _client is not None:
         return _client
-    return httpx.Client(timeout=120.0)
+    return httpx.Client(timeout=httpx.Timeout(600.0, connect=30.0))

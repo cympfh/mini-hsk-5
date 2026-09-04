@@ -22,6 +22,8 @@ def test_no_frontend_frameworks() -> None:
     html = (TEMPLATES / "index.html").read_text()
     assert 'src="/app.js' in html
     assert "cdn" not in html.lower()
+    assert "試験開始" in js
+    assert "data-start" in js
 
 
 def test_app_js_runs_in_window() -> None:

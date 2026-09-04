@@ -160,21 +160,26 @@
     }
 
     function renderList() {
-      var rows = state.exams.map(function (e) {
+      var cards = state.exams.map(function (e) {
         var best = e.best_total == null ? "—" : fmt(e.best_total);
-        var start = e.status === "ready"
-          ? "<button data-start=\"" + e.id + "\">开始</button>"
-          : "<span>" + (e.status || "") + "</span>";
-        return "<tr><td>" + e.id + "</td><td>" + e.size + "%</td><td>" + (e.created_at || "") + "</td><td>" + best + "</td><td>" + (e.best_at || "—") + "</td><td>" + start + "</td></tr>";
+        var meta = "ID " + e.id + "　サイズ " + e.size + "%　" + (e.created_at || "");
+        var score = "最高点 " + best + (e.best_at ? "（" + e.best_at + "）" : "");
+        var action;
+        if (e.status === "ready") {
+          action = "<button class=\"primary start-btn\" data-start=\"" + e.id + "\">試験開始</button>";
+        } else if (e.status === "generating") {
+          action = "<p class=\"hint\">生成中… " + (e.progress || "") + "</p>";
+        } else {
+          action = "<p class=\"hint\">生成失敗" + (e.error ? "（" + e.error + "）" : "") + "。上から作り直す。</p>";
+        }
+        return "<article class=\"exam-card\"><p class=\"exam-meta\">" + meta + "</p><p class=\"exam-score\">" + score + "</p>" + action + "</article>";
       }).join("");
       root.innerHTML =
-        "<div class=\"admit\"><span>准考证号　未发放</span><strong>报名 · 组卷</strong></div>" +
+        "<div class=\"admit\"><span>模擬試験</span><strong>一覧</strong></div>" +
         (state.error ? "<p class=\"hint\">" + state.error + "</p>" : "") +
-        "<div class=\"row\"><label class=\"size\">规模 <input id=\"size\" type=\"range\" min=\"1\" max=\"100\" value=\"" + state.size + "\"> <span id=\"sizev\">" + state.size + "%</span></label>" +
-        "<button class=\"primary\" id=\"make\">生成试卷</button></div>" +
-        (state.exams.length
-          ? "<table class=\"exams\"><thead><tr><th>ID</th><th>规模</th><th>作成</th><th>最高</th><th>最高日時</th><th></th></tr></thead><tbody>" + rows + "</tbody></table>"
-          : "<p class=\"empty\">还没有试卷。拉动规模，生成一套。</p>");
+        "<div class=\"row\"><label class=\"size\">サイズ <input id=\"size\" type=\"range\" min=\"1\" max=\"100\" value=\"" + state.size + "\"> <span id=\"sizev\">" + state.size + "%</span></label>" +
+        "<button class=\"primary\" id=\"make\">試験を作る</button></div>" +
+        (state.exams.length ? cards : "<p class=\"empty\">試験が無い。サイズを選んで「試験を作る」。</p>");
       var slider = $("#size", root);
       slider.addEventListener("input", function () {
         state.size = parseInt(slider.value, 10);
@@ -187,7 +192,7 @@
     }
 
     function renderGenerating() {
-      root.innerHTML = "<div class=\"admit\"><span>组卷中</span><strong>" + (state.pending || "") + "</strong></div><p>正在出题… " + (state.progress || "") + "</p>";
+      root.innerHTML = "<div class=\"admit\"><span>生成中</span><strong>" + (state.pending || "") + "</strong></div><p>問題を作っている。数分かかることがある。</p><p class=\"hint\">" + (state.progress || "") + "</p>";
     }
 
     function bubbles(item) {
