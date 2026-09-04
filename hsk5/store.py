@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from hsk5.ids import new_id
+from hsk5.ids import is_id, new_id
 from hsk5.models import Exam
 from hsk5.paths import db_path, exams_dir
 
@@ -58,11 +58,14 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
-def exam_dir(exam_id: str) -> Path:
+def exam_dir(exam_id: str, *, create: bool = True) -> Path:
+    if not is_id(exam_id):
+        raise ValueError("bad exam id")
     d = exams_dir() / exam_id
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "audio").mkdir(exist_ok=True)
-    (d / "images").mkdir(exist_ok=True)
+    if create:
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "audio").mkdir(exist_ok=True)
+        (d / "images").mkdir(exist_ok=True)
     return d
 
 
@@ -99,7 +102,7 @@ def save_exam(exam: Exam) -> None:
 
 
 def load_exam(exam_id: str) -> Exam:
-    path = exam_dir(exam_id) / "exam.json"
+    path = exam_dir(exam_id, create=False) / "exam.json"
     return Exam.model_validate_json(path.read_text(encoding="utf-8"))
 
 
@@ -196,9 +199,13 @@ def save_attempt_result(
         conn.commit()
 
 
-def audio_path(exam_id: str, clip_id: str) -> Path:
-    return exam_dir(exam_id) / "audio" / f"{clip_id}.mp3"
+def audio_path(exam_id: str, clip_id: str, *, create: bool = True) -> Path:
+    if not is_id(clip_id):
+        raise ValueError("bad clip id")
+    return exam_dir(exam_id, create=create) / "audio" / f"{clip_id}.mp3"
 
 
-def image_path(exam_id: str, name: str) -> Path:
-    return exam_dir(exam_id) / "images" / name
+def image_path(exam_id: str, name: str, *, create: bool = True) -> Path:
+    if Path(name).name != name or name in {".", ".."}:
+        raise ValueError("bad image name")
+    return exam_dir(exam_id, create=create) / "images" / name

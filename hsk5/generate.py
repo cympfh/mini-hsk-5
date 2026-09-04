@@ -351,6 +351,14 @@ def generate_exam(exam_id: str, size: int, *, llm: LLM | None = None) -> Exam:
         )
         essays.append(EssayItem(id=new_id(), kind="picture", image_prompt=pic.prompt, image_name="writing.png"))
 
+    if len(listening) != counts.listening_total:
+        raise RuntimeError("listening count mismatch")
+    if len(reading) != counts.reading_total:
+        raise RuntimeError("reading count mismatch")
+    if len(sentences) != counts.writing_p1:
+        raise RuntimeError("writing p1 count mismatch")
+    if len(essays) != counts.writing_p2:
+        raise RuntimeError("writing p2 count mismatch")
     return Exam(
         id=exam_id,
         size=size,
@@ -366,14 +374,19 @@ def generate_exam(exam_id: str, size: int, *, llm: LLM | None = None) -> Exam:
 
 def attach_media(exam: Exam) -> None:
     for clip in exam.clips:
-        chunks: list[bytes] = []
-        for line in clip.lines:
-            chunks.append(tts.synth(line.text, tts.voice_for(line.speaker)))
+        spoken = [ln.text for ln in clip.lines]
         if clip.question_text:
-            chunks.append(tts.synth(clip.question_text, tts.voice_for("NARR")))
-        store.audio_path(exam.id, clip.id).write_bytes(b"".join(chunks))
+            spoken.append(clip.question_text)
+        audio = tts.synth("\n".join(spoken), tts.voice_for("NARR"))
+        if len(audio) < 16:
+            raise RuntimeError("empty audio")
+        store.audio_path(exam.id, clip.id).write_bytes(audio)
     for essay in exam.essays:
         if essay.kind == "picture":
             prompt = essay.image_prompt or "Photorealistic candid photo of two people talking in a city park, no text"
-            store.image_path(exam.id, essay.image_name or "writing.png").write_bytes(imagine.generate_image(prompt))
-            essay.image_name = essay.image_name or "writing.png"
+            blob = imagine.generate_image(prompt)
+            if len(blob) < 32:
+                raise RuntimeError("empty image")
+            name = essay.image_name or "writing.png"
+            store.image_path(exam.id, name).write_bytes(blob)
+            essay.image_name = name

@@ -41,6 +41,14 @@ def test_essay_guard_short_cannot_stay_high() -> None:
     assert guarded.score <= 20
 
 
+def test_essay_unrelated_image_cannot_stay_high() -> None:
+    raw = EssayGrokOut(band="high", score=30, char_count=80, related_to_image=False, comment_ja="x")
+    text = "环境保护是每个人的责任，我们应该养成好习惯，因为习惯会影响未来的生活。" * 2
+    guarded = apply_essay_guards(raw, text, ["环境", "保护", "责任", "习惯", "影响"])
+    assert guarded.band != "high"
+    assert guarded.score <= 20
+
+
 def test_essay_blank_is_zero() -> None:
     raw = EssayGrokOut(band="high", score=30, char_count=0, comment_ja="x")
     guarded = apply_essay_guards(raw, "   ", ["环境"])

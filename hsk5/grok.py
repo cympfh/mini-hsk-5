@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
@@ -17,14 +18,23 @@ class GrokError(RuntimeError):
     pass
 
 
-def parse(model_type: type[T], system: str, user: str) -> T:
+def parse(model_type: type[T], system: str, user: str, *, image: bytes | None = None) -> T:
     key = os.environ.get("XAI_API_KEY") or ""
     schema = model_type.model_json_schema()
+    user_content: str | list[dict[str, Any]]
+    if image:
+        b64 = base64.b64encode(image).decode("ascii")
+        user_content = [
+            {"type": "text", "text": user},
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+        ]
+    else:
+        user_content = user
     body = {
         "model": MODEL,
         "messages": [
             {"role": "system", "content": system},
-            {"role": "user", "content": user},
+            {"role": "user", "content": user_content},
         ],
         "response_format": {
             "type": "json_schema",
@@ -38,9 +48,9 @@ def parse(model_type: type[T], system: str, user: str) -> T:
     try:
         content = data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as e:
-        raise GrokError(f"unexpected grok payload: {data!r}") from e
+        raise GrokError("unexpected grok payload") from e
     if isinstance(content, list):
         content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
     if not isinstance(content, str):
-        raise GrokError(f"non-string grok content: {content!r}")
+        raise GrokError("non-string grok content")
     return model_type.model_validate(json.loads(content))

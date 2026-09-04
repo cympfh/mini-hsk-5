@@ -130,6 +130,11 @@ class StubXAI:
             assert json is not None
             name = json["response_format"]["json_schema"]["name"]
             user = json["messages"][1]["content"]
+            if isinstance(user, list):
+                user = next(
+                    (p.get("text", "") for p in user if isinstance(p, dict) and p.get("type") == "text"),
+                    "",
+                )
             self.schema_calls.append(name)
             if name in self.fail_first:
                 self.fail_first.remove(name)

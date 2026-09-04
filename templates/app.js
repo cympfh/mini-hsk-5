@@ -153,6 +153,9 @@
         state.result = j.result;
         state.view = "result";
         render();
+      }).catch(function (e) {
+        state.error = String(e.message || e);
+        render();
       });
     }
 
@@ -196,7 +199,8 @@
 
     function renderTake() {
       var exam = state.exam;
-      var html = "<div class=\"admit\"><span>准考证号　" + exam.id + "</span><strong class=\"timer\" id=\"timer\">" + clock(state.remain) + "</strong></div>";
+      var html = (state.error ? "<p class=\"hint\">" + state.error + "</p>" : "") +
+        "<div class=\"admit\"><span>准考证号　" + exam.id + "</span><strong class=\"timer\" id=\"timer\">" + clock(state.remain) + "</strong></div>";
       html += "<div class=\"section-h\"><h2>" + (state.section === "listening" ? "听力" : state.section === "reading" ? "阅读" : "书写") + "</h2><span class=\"hint\">" + exam.size + "%</span></div>";
       var i;
       if (state.section === "listening") {
@@ -241,20 +245,24 @@
       });
       root.querySelectorAll("[data-sent]").forEach(function (box) {
         var id = box.getAttribute("data-sent");
+        var item = null;
+        (state.exam.sentence_order || []).forEach(function (s) { if (s.id === id) item = s; });
         var picked = [];
         box.querySelectorAll(".chip").forEach(function (ch) {
           ch.addEventListener("click", function () {
-            var w = ch.textContent;
-            if (ch.className.indexOf("on") >= 0) {
+            var idx = parseInt(ch.getAttribute("data-w"), 10);
+            var pos = picked.indexOf(idx);
+            if (pos >= 0) {
               ch.className = "chip";
-              picked = picked.filter(function (x) { return x !== w; });
+              picked.splice(pos, 1);
             } else {
               ch.className = "chip on";
-              picked.push(w);
+              picked.push(idx);
             }
-            state.answers.sentence[id] = picked.join("");
+            var words = item ? picked.map(function (i) { return item.words[i]; }) : [];
+            state.answers.sentence[id] = words.join("");
             var p = root.querySelector("[data-preview=\"" + id + "\"]");
-            if (p) p.textContent = picked.join("");
+            if (p) p.textContent = words.join("");
           });
         });
       });
@@ -270,6 +278,39 @@
       $("#next", root).addEventListener("click", nextSection);
     }
 
+    function reviewHtml(r) {
+      var html = "";
+      function mcqBlock(title, items) {
+        if (!items || !items.length) return "";
+        var rows = items.map(function (it, i) {
+          return "<div class=\"item\"><span class=\"qno\">" + (i + 1) + "</span>" +
+            (it.correct ? "正" : "誤") + "　答 " + (it.answer || "") +
+            (it.transcript ? "<div class=\"passage\">" + it.transcript + "</div>" : "") +
+            (it.comment_ja ? "<p class=\"hint\">" + it.comment_ja + "</p>" : "") +
+            "</div>";
+        }).join("");
+        return "<div class=\"section-h\"><h2>" + title + "</h2></div>" + rows;
+      }
+      html += mcqBlock("听力 回顾", r.listening_items);
+      html += mcqBlock("阅读 回顾", r.reading_items);
+      if (r.sentence_items && r.sentence_items.length) {
+        html += "<div class=\"section-h\"><h2>连词成句</h2></div>";
+        r.sentence_items.forEach(function (it, i) {
+          html += "<div class=\"item\"><span class=\"qno\">" + (i + 1) + "</span>" +
+            (it.correct ? "正" : "誤") + "　" + (it.gold || "") + "</div>";
+        });
+      }
+      if (r.essay_items && r.essay_items.length) {
+        html += "<div class=\"section-h\"><h2>作文</h2></div>";
+        r.essay_items.forEach(function (it, i) {
+          html += "<div class=\"item\"><span class=\"qno\">" + (i + 1) + "</span>" +
+            (it.band || "") + "　" + fmt(it.points) + "点" +
+            (it.comment_ja ? "<p>" + it.comment_ja + "</p>" : "") + "</div>";
+        });
+      }
+      return html;
+    }
+
     function renderResult() {
       var r = state.result;
       root.innerHTML =
@@ -280,6 +321,7 @@
         "<div>书写<strong>" + fmt(r.writing) + "</strong></div>" +
         "<div>总分<strong>" + fmt(r.total) + "</strong></div></div>" +
         "<p class=\"hint\">目安 180 / 300（不是及格判定）" + (r.overtime ? " · 时间超过" : "") + "</p>" +
+        reviewHtml(r) +
         "<div class=\"row\"><button id=\"back\">返回一览</button></div>";
       $("#back", root).addEventListener("click", function () {
         state.view = "list";

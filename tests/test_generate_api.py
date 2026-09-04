@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from hsk5.http import set_http_client
@@ -110,6 +111,27 @@ def test_oov_retry_uses_second_generation(data_dir: object) -> None:
     assert exam.listening
     assert stub.schema_calls.count("ListeningP1Out") >= 2
     set_http_client(None)
+
+
+def test_bad_exam_id_404(client: TestClient, stub: StubXAI) -> None:
+    assert client.get("/api/exams/../secret").status_code == 404
+    assert client.get("/api/exams/not-hex1/audio/abcd1234").status_code == 404
+
+
+def test_failed_error_is_generic(data_dir: object, monkeypatch: pytest.MonkeyPatch, stub: StubXAI) -> None:
+    from hsk5 import generate, jobs, store
+
+    store.create_exam_row("abcd1234", 10)
+
+    def boom(*_a: object, **_k: object) -> object:
+        raise RuntimeError("answer=A transcript=secret")
+
+    monkeypatch.setattr(generate, "generate_exam", boom)
+    jobs.run_generate("abcd1234", 10)
+    row = store.get_exam_row("abcd1234")
+    assert row is not None
+    assert row["status"] == "failed"
+    assert row["error"] == "generation failed"
 
 
 def test_audio_and_image_served(client: TestClient, stub: StubXAI) -> None:

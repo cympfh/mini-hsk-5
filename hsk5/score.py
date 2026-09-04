@@ -61,7 +61,8 @@ def apply_essay_guards(raw: EssayGrokOut, text: str, required: list[str]) -> Ess
         )
     band: Band = raw.band
     score = clip_score_to_band(raw.score, band)
-    if band == "high" and (missing or n < HANZI_SHORT):
+    unrelated = raw.related_to_image is False
+    if band == "high" and (missing or n < HANZI_SHORT or unrelated):
         band = "mid"
         score = min(score, 20)
         if score < 11:
