@@ -9,6 +9,15 @@ from hsk5.scale import scale_counts
 log = logging.getLogger(__name__)
 
 
+def _public_error(exc: BaseException) -> str:
+    """Expose safe diagnostics; never leak answers/transcripts into the exam list."""
+    text = str(exc)
+    if isinstance(exc, RuntimeError) and text.startswith("OOV remaining"):
+        detail = f"RuntimeError: {text}"
+        return detail if len(detail) <= 240 else detail[:237] + "..."
+    return "generation failed"
+
+
 def run_generate(exam_id: str, size: int, *, llm: LLM | None = None) -> None:
     steps = planned_steps(scale_counts(size))
 
@@ -31,7 +40,4 @@ def run_generate(exam_id: str, size: int, *, llm: LLM | None = None) -> None:
         store.save_exam(exam)
     except Exception as e:
         log.exception("generate failed exam_id=%s", exam_id)
-        detail = f"{type(e).__name__}: {e}"
-        if len(detail) > 240:
-            detail = detail[:237] + "..."
-        store.set_status(exam_id, "failed", detail)
+        store.set_status(exam_id, "failed", _public_error(e))
