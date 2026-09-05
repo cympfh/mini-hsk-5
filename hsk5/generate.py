@@ -4,7 +4,7 @@ import os
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Literal, Protocol, TypeVar
+from typing import Literal, Protocol, TypeVar, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -74,10 +74,6 @@ class ListeningItemOut(_Strict):
     answer: ChoiceKey
 
 
-class ListeningP1Out(_Strict):
-    items: list[ListeningItemOut]
-
-
 class ListeningQOut(_Strict):
     question: str
     choices: list[ChoiceOut]
@@ -87,10 +83,6 @@ class ListeningQOut(_Strict):
 class ListeningClipOut(_Strict):
     lines: list[LineOut]
     questions: list[ListeningQOut]
-
-
-class ListeningP2Out(_Strict):
-    clips: list[ListeningClipOut]
 
 
 class ClozeBlankOut(_Strict):
@@ -103,18 +95,10 @@ class ClozePassageOut(_Strict):
     blanks: list[ClozeBlankOut]
 
 
-class ReadingP1Out(_Strict):
-    passages: list[ClozePassageOut]
-
-
 class ReadingShortOut(_Strict):
     text: str
     choices: list[ChoiceOut]
     answer: ChoiceKey
-
-
-class ReadingP2Out(_Strict):
-    items: list[ReadingShortOut]
 
 
 class ReadingLongOut(_Strict):
@@ -122,17 +106,9 @@ class ReadingLongOut(_Strict):
     questions: list[ListeningQOut]
 
 
-class ReadingP3Out(_Strict):
-    passages: list[ReadingLongOut]
-
-
 class SentenceOut(_Strict):
     words: list[str]
     gold: str
-
-
-class WritingP1Out(_Strict):
-    items: list[SentenceOut]
 
 
 class KeywordsOut(_Strict):
@@ -192,8 +168,9 @@ def _transcript(lines: list[SpeakerLine], question: str) -> str:
     return body + f"\nNARR: {question}"
 
 
-def _slot_extra(extra: str, index: int, total: int) -> str:
-    return f"{extra} This is empty slot {index + 1} of {total}; invent a distinct situation for this slot only."
+def _slot_user(vocab: Vocab, extra: str, avoid: list[str], index: int, total: int, *, count: int = 1) -> str:
+    slotted = f"{extra} This is empty slot {index + 1} of {total}; invent a distinct situation for this slot only."
+    return _user(count, vocab, slotted, avoid)
 
 
 def _parallel_map(
@@ -204,7 +181,7 @@ def _parallel_map(
     note: Callable[[str, str], None],
     concurrency: int | None = None,
 ) -> list[U]:
-    """Fill n empty slots with fn(i), preserving order. Progress counts completions."""
+    """Fill n slots with fn(i), preserve order, report completions."""
     if n <= 0:
         return []
     workers = concurrency or gen_concurrency()
@@ -215,11 +192,11 @@ def _parallel_map(
             out.append(fn(i))
         return out
 
-    slots: list[U | None] = [None] * n
+    missing: object = object()
+    slots: list[object] = [missing] * n
     done = 0
     lock = threading.Lock()
     note(label, f"0/{n}")
-
     with ThreadPoolExecutor(max_workers=min(workers, n)) as pool:
         futures = {pool.submit(fn, i): i for i in range(n)}
         for fut in as_completed(futures):
@@ -228,7 +205,31 @@ def _parallel_map(
             with lock:
                 done += 1
                 note(label, f"{done}/{n}")
-    return [slot for slot in slots if slot is not None]  # all filled; keep type narrow
+    if any(slot is missing for slot in slots):
+        raise RuntimeError(f"parallel map incomplete for {label}")
+    return cast(list[U], slots)
+
+
+def _run_part(
+    n: int,
+    *,
+    label: str,
+    note: Callable[[str, str], None],
+    used: list[str],
+    build: Callable[[int, int, list[str]], tuple[U, str]],
+) -> list[U]:
+    """Build n items in parallel; append themes to used after the wave."""
+    avoid = list(used)
+
+    def fn(i: int) -> tuple[U, str]:
+        return build(i, n, avoid)
+
+    rows = _parallel_map(n, fn, label=label, note=note)
+    items: list[U] = []
+    for item, theme in rows:
+        items.append(item)
+        used.append(theme)
+    return items
 
 
 def planned_steps(counts: PartCounts) -> list[str]:
@@ -255,6 +256,36 @@ def planned_steps(counts: PartCounts) -> list[str]:
     return steps
 
 
+def _listening_pair(
+    *,
+    part: Literal["p1", "p2"],
+    item_part: str,
+    lines: list[SpeakerLine],
+    question: str,
+    choices: list[Choice],
+    answer: ChoiceKey,
+) -> tuple[tuple[ListeningClip, McqItem], str]:
+    clip_id = new_id()
+    item_id = new_id()
+    clip = ListeningClip(
+        id=clip_id,
+        part=part,
+        lines=lines,
+        question_text=question,
+        item_ids=[item_id],
+    )
+    item = McqItem(
+        id=item_id,
+        part=item_part,
+        prompt="",
+        choices=choices,
+        answer=answer,
+        clip_id=clip_id,
+        transcript=_transcript(lines, question),
+    )
+    return (clip, item), _theme(question, *(ln.text for ln in lines))
+
+
 def generate_exam(exam_id: str, size: int, *, llm: LLM | None = None, report: ReportFn | None = None) -> Exam:
     llm = llm or GrokLLM()
     vocab = load_vocab()
@@ -267,124 +298,63 @@ def generate_exam(exam_id: str, size: int, *, llm: LLM | None = None, report: Re
     essays: list[EssayItem] = []
     used: list[str] = []
 
-    def _note(label: str, detail: str = "") -> None:
+    def note(label: str, detail: str = "") -> None:
         if report:
             report(label, detail)
 
-    def _avoid() -> list[str]:
-        return list(used)
-
-    # --- listening p1 ---
-    n = counts.listening_p1
-    avoid = _avoid()
-
-    def _lp1(i: int) -> tuple[ListeningClip, McqItem, str]:
+    def build_lp1(i: int, n: int, avoid: list[str]) -> tuple[tuple[ListeningClip, McqItem], str]:
         raw = _parse(
             llm,
             ListeningItemOut,
             vocab,
-            _user(
-                1,
+            _slot_user(
                 vocab,
-                _slot_extra(
-                    "One short two-person dialogue. One question. Third person asks.",
-                    i,
-                    n,
-                ),
+                "One short two-person dialogue. One question. Third person asks.",
                 avoid,
+                i,
+                n,
             ),
         )
-        clip_id = new_id()
-        item_id = new_id()
-        lines = _lines(raw.lines)
-        clip = ListeningClip(
-            id=clip_id,
+        return _listening_pair(
             part="p1",
-            lines=lines,
-            question_text=raw.question,
-            item_ids=[item_id],
-        )
-        item = McqItem(
-            id=item_id,
-            part="listening_p1",
-            prompt="",
+            item_part="listening_p1",
+            lines=_lines(raw.lines),
+            question=raw.question,
             choices=_choices(raw.choices),
             answer=raw.answer,
-            clip_id=clip_id,
-            transcript=_transcript(lines, raw.question),
         )
-        return clip, item, _theme(raw.question, *(ln.text for ln in raw.lines))
 
-    for clip, item, theme in _parallel_map(n, _lp1, label="听力 第1部分", note=_note):
-        clips.append(clip)
-        listening.append(item)
-        used.append(theme)
-
-    # --- listening p2 ---
-    n = counts.listening_p2
-    avoid = _avoid()
-
-    def _lp2(i: int) -> tuple[ListeningClip, McqItem, str]:
+    def build_lp2(i: int, n: int, avoid: list[str]) -> tuple[tuple[ListeningClip, McqItem], str]:
         raw = _parse(
             llm,
             ListeningClipOut,
             vocab,
-            _user(
-                1,
+            _slot_user(
                 vocab,
-                _slot_extra(
-                    "One clip of 4-5 sentences (dialogue or monologue) with exactly one question.",
-                    i,
-                    n,
-                ),
+                "One clip of 4-5 sentences (dialogue or monologue) with exactly one question.",
                 avoid,
+                i,
+                n,
             ),
         )
-        qs = raw.questions[:1]
-        if not qs:
+        if not raw.questions:
             raise RuntimeError("listening p2 missing question")
-        clip_id = new_id()
-        item_id = new_id()
-        lines = _lines(raw.lines)
-        q = qs[0]
-        clip = ListeningClip(
-            id=clip_id,
+        q = raw.questions[0]
+        return _listening_pair(
             part="p2",
-            lines=lines,
-            question_text=q.question,
-            item_ids=[item_id],
-        )
-        item = McqItem(
-            id=item_id,
-            part="listening_p2",
-            prompt="",
+            item_part="listening_p2",
+            lines=_lines(raw.lines),
+            question=q.question,
             choices=_choices(q.choices),
             answer=q.answer,
-            clip_id=clip_id,
-            transcript=_transcript(lines, q.question),
         )
-        return clip, item, _theme(q.question, *(ln.text for ln in raw.lines))
 
-    for clip, item, theme in _parallel_map(n, _lp2, label="听力 第2部分", note=_note):
-        clips.append(clip)
-        listening.append(item)
-        used.append(theme)
-
-    # --- reading p1 ---
-    n = counts.reading_p1
-    avoid = _avoid()
-
-    def _rp1(i: int) -> tuple[McqItem, str]:
+    def build_rp1(i: int, n: int, avoid: list[str]) -> tuple[McqItem, str]:
         passage = _parse(
             llm,
             ClozePassageOut,
             vocab,
-            _user(
-                1,
-                vocab,
-                _slot_extra("One short cloze passage with exactly one blank marked ____.", i, n),
-                avoid,
-            ),
+            _slot_user(vocab, "One short cloze passage with exactly one blank marked ____.", avoid, i, n),
         )
         if not passage.blanks:
             raise RuntimeError("cloze missing blank")
@@ -399,25 +369,12 @@ def generate_exam(exam_id: str, size: int, *, llm: LLM | None = None, report: Re
         )
         return item, _theme(passage.text)
 
-    for item, theme in _parallel_map(n, _rp1, label="阅读 空所補充", note=_note):
-        reading.append(item)
-        used.append(theme)
-
-    # --- reading p2 ---
-    n = counts.reading_p2
-    avoid = _avoid()
-
-    def _rp2(i: int) -> tuple[McqItem, str]:
+    def build_rp2(i: int, n: int, avoid: list[str]) -> tuple[McqItem, str]:
         raw = _parse(
             llm,
             ReadingShortOut,
             vocab,
-            _user(
-                1,
-                vocab,
-                _slot_extra("One short paragraph. Choose the statement that matches.", i, n),
-                avoid,
-            ),
+            _slot_user(vocab, "One short paragraph. Choose the statement that matches.", avoid, i, n),
         )
         item = McqItem(
             id=new_id(),
@@ -429,24 +386,17 @@ def generate_exam(exam_id: str, size: int, *, llm: LLM | None = None, report: Re
         )
         return item, _theme(raw.text)
 
-    for item, theme in _parallel_map(n, _rp2, label="阅读 短文", note=_note):
-        reading.append(item)
-        used.append(theme)
-
-    # --- reading p3 ---
-    n = counts.reading_p3
-    avoid = _avoid()
-
-    def _rp3(i: int) -> tuple[McqItem, str]:
+    def build_rp3(i: int, n: int, avoid: list[str]) -> tuple[McqItem, str]:
         passage = _parse(
             llm,
             ReadingLongOut,
             vocab,
-            _user(
-                1,
+            _slot_user(
                 vocab,
-                _slot_extra("One longer passage with exactly one multiple-choice question.", i, n),
+                "One longer passage with exactly one multiple-choice question.",
                 avoid,
+                i,
+                n,
             ),
         )
         if not passage.questions:
@@ -462,72 +412,53 @@ def generate_exam(exam_id: str, size: int, *, llm: LLM | None = None, report: Re
         )
         return item, _theme(q.question, passage.text)
 
-    for item, theme in _parallel_map(n, _rp3, label="阅读 長文", note=_note):
-        reading.append(item)
-        used.append(theme)
-
-    # --- writing p1 ---
-    n = counts.writing_p1
-    avoid = _avoid()
-
-    def _wp1(i: int) -> tuple[SentenceOrderItem, str]:
+    def build_wp1(i: int, n: int, avoid: list[str]) -> tuple[SentenceOrderItem, str]:
         raw = _parse(
             llm,
             SentenceOut,
             vocab,
-            _user(
-                1,
+            _slot_user(
                 vocab,
-                _slot_extra(
-                    "One sentence-reordering item. words is shuffled; gold is the correct sentence.",
-                    i,
-                    n,
-                ),
+                "One sentence-reordering item. words is shuffled; gold is the correct sentence.",
                 avoid,
+                i,
+                n,
             ),
         )
         return SentenceOrderItem(id=new_id(), words=list(raw.words), gold=raw.gold), _theme(raw.gold)
 
-    for item, theme in _parallel_map(n, _wp1, label="連詞成句", note=_note):
-        sentences.append(item)
-        used.append(theme)
-
-    # writing p2: at most 2, run in parallel when both needed
-    if counts.writing_p2 >= 1:
-        avoid = _avoid()
-        n_essays = counts.writing_p2
-
-        def _essay(i: int) -> tuple[EssayItem, str]:
-            if i == 0:
-                kw = _parse(
-                    llm,
-                    KeywordsOut,
-                    vocab,
-                    _user(5, vocab, "Five related HSK5 words for an 80-character essay.", avoid),
-                )
-                return (
-                    EssayItem(id=new_id(), kind="keywords", required_words=list(kw.words)[:5]),
-                    _theme(*kw.words),
-                )
-            pic = _parse(
+    def build_essay(i: int, n: int, avoid: list[str]) -> tuple[EssayItem, str]:
+        if i == 0:
+            kw = _parse(
                 llm,
-                PictureOut,
+                KeywordsOut,
                 vocab,
-                _user(
-                    1,
-                    vocab,
-                    "English photo prompt of a simple everyday scene. No text in the image.",
-                    avoid,
-                ),
+                _user(5, vocab, "Five related HSK5 words for an 80-character essay.", avoid),
             )
-            return (
-                EssayItem(id=new_id(), kind="picture", image_prompt=pic.prompt, image_name="writing.png"),
-                _theme(pic.prompt),
-            )
+            return EssayItem(id=new_id(), kind="keywords", required_words=list(kw.words)[:5]), _theme(*kw.words)
+        pic = _parse(
+            llm,
+            PictureOut,
+            vocab,
+            _user(1, vocab, "English photo prompt of a simple everyday scene. No text in the image.", avoid),
+        )
+        return (
+            EssayItem(id=new_id(), kind="picture", image_prompt=pic.prompt, image_name="writing.png"),
+            _theme(pic.prompt),
+        )
 
-        for item, theme in _parallel_map(n_essays, _essay, label="作文の課題", note=_note):
-            essays.append(item)
-            used.append(theme)
+    for clip, item in _run_part(counts.listening_p1, label="听力 第1部分", note=note, used=used, build=build_lp1):
+        clips.append(clip)
+        listening.append(item)
+    for clip, item in _run_part(counts.listening_p2, label="听力 第2部分", note=note, used=used, build=build_lp2):
+        clips.append(clip)
+        listening.append(item)
+    reading.extend(_run_part(counts.reading_p1, label="阅读 空所補充", note=note, used=used, build=build_rp1))
+    reading.extend(_run_part(counts.reading_p2, label="阅读 短文", note=note, used=used, build=build_rp2))
+    reading.extend(_run_part(counts.reading_p3, label="阅读 長文", note=note, used=used, build=build_rp3))
+    sentences.extend(_run_part(counts.writing_p1, label="連詞成句", note=note, used=used, build=build_wp1))
+    if counts.writing_p2:
+        essays.extend(_run_part(counts.writing_p2, label="作文の課題", note=note, used=used, build=build_essay))
 
     if len(listening) != counts.listening_total:
         raise RuntimeError("listening count mismatch")
@@ -551,13 +482,11 @@ def generate_exam(exam_id: str, size: int, *, llm: LLM | None = None, report: Re
 
 
 def attach_media(exam: Exam, report: ReportFn | None = None) -> None:
-    nclips = len(exam.clips)
-
-    def _note(label: str, detail: str = "") -> None:
+    def note(label: str, detail: str = "") -> None:
         if report:
             report(label, detail)
 
-    def _one_clip(i: int) -> None:
+    def one_clip(i: int) -> None:
         clip = exam.clips[i]
         spoken = [ln.text for ln in clip.lines]
         if clip.question_text:
@@ -567,16 +496,17 @@ def attach_media(exam: Exam, report: ReportFn | None = None) -> None:
             raise RuntimeError("empty audio")
         store.audio_path(exam.id, clip.id).write_bytes(audio)
 
-    _parallel_map(nclips, _one_clip, label="音声合成", note=_note)
+    _parallel_map(len(exam.clips), one_clip, label="音声合成", note=note)
 
     for essay in exam.essays:
-        if essay.kind == "picture":
-            if report:
-                report("看图の画像", "")
-            prompt = essay.image_prompt or "Photorealistic candid photo of two people talking in a city park, no text"
-            blob = imagine.generate_image(prompt)
-            if len(blob) < 32:
-                raise RuntimeError("empty image")
-            name = essay.image_name or "writing.png"
-            store.image_path(exam.id, name).write_bytes(blob)
-            essay.image_name = name
+        if essay.kind != "picture":
+            continue
+        if report:
+            report("看图の画像", "")
+        prompt = essay.image_prompt or "Photorealistic candid photo of two people talking in a city park, no text"
+        blob = imagine.generate_image(prompt)
+        if len(blob) < 32:
+            raise RuntimeError("empty image")
+        name = essay.image_name or "writing.png"
+        store.image_path(exam.id, name).write_bytes(blob)
+        essay.image_name = name
