@@ -23,19 +23,11 @@ ALLOWED_PROPER = frozenset(
     }
 )
 
-# Forms missing as standalone entries in the inclusive JSON, but needed for
-# natural HSK text (plural suffix 们; bare 饭 in compounds like 吃饭).
-ALLOWED_EXTRA = frozenset(
-    {
-        "们",
-        "饭",
-    }
-)
-
 
 @dataclass(frozen=True)
 class Vocab:
     words: frozenset[str]
+    chars: frozenset[str]
     entries: tuple[dict[str, str], ...]
     max_len: int
 
@@ -44,6 +36,12 @@ class Vocab:
         pool = list(self.words)
         k = min(k, len(pool))
         return rng.sample(pool, k)
+
+    def _allowed(self, piece: str) -> bool:
+        if piece in self.words or piece in ALLOWED_PROPER:
+            return True
+        # Hanzi that appear in listed words count as inventory.
+        return len(piece) == 1 and piece in self.chars
 
     def oov(self, text: str) -> list[str]:
         found: list[str] = []
@@ -58,7 +56,7 @@ class Vocab:
             upper = min(self.max_len, n - i)
             for length in range(upper, 0, -1):
                 piece = text[i : i + length]
-                if piece in self.words or piece in ALLOWED_PROPER or piece in ALLOWED_EXTRA:
+                if self._allowed(piece):
                     matched = piece
                     break
             if matched is None:
@@ -79,7 +77,13 @@ def load_vocab(path: Path | None = None) -> Vocab:
     p = path or VOCAB_PATH
     raw = json.loads(p.read_text(encoding="utf-8"))
     words = frozenset(row["s"] for row in raw if row.get("s"))
-    vocab = Vocab(words=words, entries=tuple(raw), max_len=max(len(w) for w in words))
+    chars = frozenset(ch for w in words for ch in w if "\u4e00" <= ch <= "\u9fff")
+    vocab = Vocab(
+        words=words,
+        chars=chars,
+        entries=tuple(raw),
+        max_len=max(len(w) for w in words),
+    )
     if path is None:
         _CACHED = vocab
     return vocab
