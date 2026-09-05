@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import os
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
@@ -16,7 +18,18 @@ from hsk5.store import ExamNotReady
 if not os.environ.get("XAI_API_KEY"):
     raise SystemExit("XAI_API_KEY is required")
 
-app = FastAPI(title="mini-hsk-5")
+log = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    ids = store.fail_interrupted_generating()
+    if ids:
+        log.warning("marked %d interrupted generating exam(s) failed: %s", len(ids), ",".join(ids))
+    yield
+
+
+app = FastAPI(title="mini-hsk-5", lifespan=lifespan)
 
 
 def _prefix() -> str:

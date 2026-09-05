@@ -316,6 +316,19 @@ def is_cancelled(exam_id: str) -> bool:
     return row is not None and row["status"] == "cancelled"
 
 
+def fail_interrupted_generating(error: str = "interrupted by restart") -> list[str]:
+    """Mark in-flight generating exams as failed (e.g. after process restart)."""
+    with _connect() as conn:
+        rows = conn.execute("SELECT id FROM exams WHERE status = ?", ("generating",)).fetchall()
+    ids = [str(r["id"]) for r in rows]
+    for exam_id in ids:
+        set_status(exam_id, "failed", error)
+        d = exam_dir(exam_id, create=False)
+        if d.exists():
+            shutil.rmtree(d, ignore_errors=True)
+    return ids
+
+
 def cancel_exam(exam_id: str) -> dict[str, Any]:
     row = get_exam_row(exam_id)
     if row is None:
