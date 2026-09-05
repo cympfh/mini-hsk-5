@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from hsk5.scale import PartCounts, scale_counts
 
@@ -136,16 +136,59 @@ class SubmitIn(BaseModel):
     essay: dict[str, str] = Field(default_factory=dict)
 
 
+class PartsIn(BaseModel):
+    listening_p1: int = Field(0, ge=0, le=45)
+    listening_p2: int = Field(0, ge=0, le=45)
+    reading_p1: int = Field(0, ge=0, le=30)
+    reading_p2: int = Field(0, ge=0, le=20)
+    reading_p3: int = Field(0, ge=0, le=30)
+    writing_p1: int = Field(0, ge=0, le=20)
+    writing_keywords: int = Field(0, ge=0, le=10)
+    writing_picture: int = Field(0, ge=0, le=20)
+
+    @property
+    def total(self) -> int:
+        return (
+            self.listening_p1
+            + self.listening_p2
+            + self.reading_p1
+            + self.reading_p2
+            + self.reading_p3
+            + self.writing_p1
+            + self.writing_keywords
+            + self.writing_picture
+        )
+
+
 class CreateIn(BaseModel):
     size: int = Field(default=10, ge=1, le=100)
-    mode: Literal["full", "picture"] = "full"
+    parts: PartsIn | None = None
 
-    def model_post_init(self, __context: Any) -> None:
-        if self.mode == "picture" and not (1 <= self.size <= 20):
-            raise ValueError("picture mode size must be 1..20")
+    @model_validator(mode="after")
+    def _parts_not_empty(self) -> CreateIn:
+        if self.parts is not None and self.parts.total <= 0:
+            raise ValueError("need at least one item")
+        return self
+
+    def resolved_mode(self) -> str:
+        return "custom" if self.parts is not None else "full"
 
 
-def counts_from_exam_size(size: int, mode: str = "full") -> PartCounts:
+def counts_from_exam_size(size: int, parts: PartsIn | None = None) -> PartCounts:
     from hsk5.scale import counts_for
 
-    return counts_for(size, mode)
+    if parts is None:
+        return counts_for(size=size)
+    return counts_for(
+        size=size,
+        parts={
+            "listening_p1": parts.listening_p1,
+            "listening_p2": parts.listening_p2,
+            "reading_p1": parts.reading_p1,
+            "reading_p2": parts.reading_p2,
+            "reading_p3": parts.reading_p3,
+            "writing_p1": parts.writing_p1,
+            "writing_keywords": parts.writing_keywords,
+            "writing_picture": parts.writing_picture,
+        },
+    )

@@ -28,7 +28,7 @@
   function Hsk5() {}
 
   Hsk5.boot = function (root) {
-    var state = { view: "list", exams: [], exam: null, attempt: null, answers: { mcq: {}, sentence: {}, essay: {} }, result: null, size: 10, mode: "full", scalePreview: null, section: "listening", remain: 0, timer: null, historyExamId: null, historyAttempts: [], reviewMeta: null };
+    var state = { view: "list", exams: [], exam: null, attempt: null, answers: { mcq: {}, sentence: {}, essay: {} }, result: null, size: 10, custom: false, parts: null, scalePreview: null, section: "listening", remain: 0, timer: null, historyExamId: null, historyAttempts: [], reviewMeta: null };
     var BASE = "";
     (function () {
       var scripts = global.document.getElementsByTagName("script");
@@ -76,29 +76,79 @@
       return (m < 10 ? "0" : "") + m + ":" + (s < 10 ? "0" : "") + s;
     }
 
+    function defaultParts() {
+      return {
+        listening_p1: 0, listening_p2: 0,
+        reading_p1: 0, reading_p2: 0, reading_p3: 0,
+        writing_p1: 0, writing_keywords: 0, writing_picture: 0
+      };
+    }
+
     function refreshScalePreview() {
-      api("/api/scale?size=" + state.size + "&mode=" + state.mode).then(function (p) {
+      api("/api/scale?size=" + state.size).then(function (p) {
         state.scalePreview = p;
-        var el = $("#scaleprev");
-        if (el) el.textContent = formatScale(p);
+        if (!state.custom) {
+          state.parts = {
+            listening_p1: p.listening_p1,
+            listening_p2: p.listening_p2,
+            reading_p1: p.reading_p1,
+            reading_p2: p.reading_p2,
+            reading_p3: p.reading_p3,
+            writing_p1: p.writing_p1,
+            writing_keywords: p.writing_keywords,
+            writing_picture: p.writing_picture
+          };
+        }
+        renderPartsHints();
       }).catch(function () {});
+    }
+
+    function renderPartsHints() {
+      var el = $("#scaleprev");
+      if (el) {
+        el.textContent = formatScale(state.custom ? state.parts : state.scalePreview) +
+          (state.custom ? " · カスタム" : " · プリセット連動");
+      }
+      var p = state.parts || defaultParts();
+      Object.keys(p).forEach(function (k) {
+        var inp = $("#part-" + k);
+        if (inp) inp.value = String(p[k]);
+        var lab = $("#partv-" + k);
+        if (lab) lab.textContent = String(p[k]);
+      });
     }
 
     function formatScale(p) {
       if (!p) return "";
-      if (state.mode === "picture") {
-        return "看图 " + p.writing_p2 + " 枚 · 书写 " + p.writing_minutes + " 分";
-      }
-      return "听力 " + p.listening_total + " · 阅读 " + p.reading_total +
-        " · 连词 " + p.writing_p1 + " · 看图 " + p.writing_p2 +
-        "（计时 听" + p.listening_minutes + "/读" + p.reading_minutes + "/写" + p.writing_minutes + "）";
+      var L = (p.listening_p1 || 0) + (p.listening_p2 || 0);
+      var R = (p.reading_p1 || 0) + (p.reading_p2 || 0) + (p.reading_p3 || 0);
+      return "听力" + L + "（1部" + (p.listening_p1 || 0) + "/2部" + (p.listening_p2 || 0) + "） · 阅读" + R +
+        " · 连词" + (p.writing_p1 || 0) + " · 指定語" + (p.writing_keywords || 0) +
+        " · 看图" + (p.writing_picture || 0);
+    }
+
+    var PART_MAX = {
+      listening_p1: 45, listening_p2: 45,
+      reading_p1: 30, reading_p2: 20, reading_p3: 30,
+      writing_p1: 20, writing_keywords: 10, writing_picture: 20
+    };
+
+    function partInput(key, label) {
+      var v = (state.parts && state.parts[key] != null) ? state.parts[key] : 0;
+      var mx = PART_MAX[key] || 20;
+      return "<label class=\"part\"><span class=\"part-lab\">" + label +
+        " <strong id=\"partv-" + key + "\">" + v + "</strong></span>" +
+        "<input id=\"part-" + key + "\" data-part=\"" + key +
+        "\" type=\"range\" min=\"0\" max=\"" + mx + "\" value=\"" + v + "\"></label>";
     }
 
     function createExam() {
+      var body = { size: state.size };
+      if (state.custom) body.parts = state.parts || defaultParts();
       api("/api/exams", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ size: state.size, mode: state.mode }),
+        body: JSON.stringify(body),
       }).then(function (j) {
         state.view = "generating";
         state.pending = j.id;
@@ -229,7 +279,7 @@
     function renderList() {
       var cards = state.exams.map(function (e) {
         var best = e.best_total == null ? "—" : fmt(e.best_total);
-        var sizeLabel = (e.mode === "picture") ? ("看图×" + e.size) : (e.size + "%");
+        var sizeLabel = (e.mode === "custom") ? ("カスタム") : (e.size + "%");
         var meta = "ID " + e.id + "　" + sizeLabel + "　" + (e.created_at || "");
         var score = "最高点 " + best + (e.best_at ? "（" + e.best_at + "）" : "");
         var action;
@@ -260,43 +310,39 @@
       root.innerHTML =
         "<div class=\"admit\"><span>模擬試験</span><strong>一覧</strong></div>" +
         (state.error ? "<p class=\"hint\">" + state.error + "</p>" : "") +
-        "<div class=\"row mode-row\">" +
-        "<button type=\"button\" class=\"mode-btn" + (state.mode === "full" ? " on" : "") + "\" data-mode=\"full\">全体</button>" +
-        "<button type=\"button\" class=\"mode-btn" + (state.mode === "picture" ? " on" : "") + "\" data-mode=\"picture\">看图だけ</button>" +
-        "</div>" +
-        "<div class=\"row\"><label class=\"size\">" + (state.mode === "picture" ? "枚数" : "サイズ") +
-        " <input id=\"size\" type=\"range\" min=\"1\" max=\"" + (state.mode === "picture" ? "20" : "100") +
-        "\" value=\"" + state.size + "\"> " +
-        "<input id=\"sizen\" type=\"number\" min=\"1\" max=\"" + (state.mode === "picture" ? "20" : "100") +
-        "\" value=\"" + state.size + "\" style=\"width:4rem\"> " +
-        "<span id=\"sizev\">" + (state.mode === "picture" ? (state.size + "枚") : (state.size + "%")) + "</span></label>" +
+        "<div class=\"row\"><label class=\"size\">プリセット <input id=\"size\" type=\"range\" min=\"1\" max=\"100\" value=\"" + state.size + "\"> " +
+        "<span id=\"sizev\">" + state.size + "%</span></label>" +
         "<button class=\"primary\" id=\"make\">試験を作る</button></div>" +
-        "<p class=\"hint\" id=\"scaleprev\">" + formatScale(state.scalePreview) + "</p>" +
+        "<div class=\"parts-grid\">" +
+        partInput("listening_p1", "听力1") + partInput("listening_p2", "听力2") +
+        partInput("reading_p1", "阅读填空") + partInput("reading_p2", "阅读短文") + partInput("reading_p3", "阅读长文") +
+        partInput("writing_p1", "连词成句") + partInput("writing_keywords", "指定語") + partInput("writing_picture", "看图") +
+        "</div>" +
+        "<p class=\"hint\" id=\"scaleprev\"></p>" +
         (state.exams.length ? cards : "<p class=\"empty\">試験が無い。サイズを選んで「試験を作る」。</p>");
       var slider = $("#size", root);
-      var num = $("#sizen", root);
       function setSize(v) {
-        var max = state.mode === "picture" ? 20 : 100;
         v = parseInt(v, 10);
         if (!v || v < 1) v = 1;
-        if (v > max) v = max;
+        if (v > 100) v = 100;
         state.size = v;
+        state.custom = false;
         slider.value = String(v);
-        num.value = String(v);
-        $("#sizev", root).textContent = state.mode === "picture" ? (v + "枚") : (v + "%");
+        $("#sizev", root).textContent = v + "%";
         refreshScalePreview();
       }
       slider.addEventListener("input", function () { setSize(slider.value); });
-      num.addEventListener("change", function () { setSize(num.value); });
-      root.querySelectorAll("[data-mode]").forEach(function (b) {
-        b.addEventListener("click", function () {
-          var m = b.getAttribute("data-mode");
-          if (m === state.mode) return;
-          state.mode = m;
-          if (m === "picture" && state.size > 20) state.size = 1;
-          if (m === "full" && state.size < 1) state.size = 10;
-          render();
-          refreshScalePreview();
+      root.querySelectorAll("[data-part]").forEach(function (inp) {
+        inp.addEventListener("input", function () {
+          if (!state.parts) state.parts = defaultParts();
+          var k = inp.getAttribute("data-part");
+          var n = parseInt(inp.value, 10);
+          if (isNaN(n) || n < 0) n = 0;
+          state.parts[k] = n;
+          state.custom = true;
+          var lab = $("#partv-" + k, root);
+          if (lab) lab.textContent = String(n);
+          renderPartsHints();
         });
       });
       refreshScalePreview();
@@ -342,7 +388,7 @@
       var exam = state.exam;
       var html = (state.error ? "<p class=\"hint\">" + state.error + "</p>" : "") +
         "<div class=\"admit\"><span>准考证号　" + exam.id + "</span><strong class=\"timer\" id=\"timer\">" + clock(state.remain) + "</strong></div>";
-      html += "<div class=\"section-h\"><h2>" + (state.section === "listening" ? "听力" : state.section === "reading" ? "阅读" : "书写") + "</h2><span class=\"hint\">" + (exam.mode === "picture" ? ("看图×" + exam.size) : (exam.size + "%")) + "</span></div>";
+      html += "<div class=\"section-h\"><h2>" + (state.section === "listening" ? "听力" : state.section === "reading" ? "阅读" : "书写") + "</h2><span class=\"hint\">" + (exam.mode === "custom" ? "カスタム" : (exam.size + "%")) + "</span></div>";
       var i;
       if (state.section === "listening") {
         for (i = 0; i < exam.listening.length; i += 1) {

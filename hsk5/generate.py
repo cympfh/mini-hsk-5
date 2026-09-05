@@ -21,7 +21,7 @@ from hsk5.models import (
     SentenceOrderItem,
     SpeakerLine,
 )
-from hsk5.scale import PartCounts, counts_for, scale_counts
+from hsk5.scale import PartCounts, counts_for
 from hsk5.store import now_iso
 from hsk5.vocab import ALLOWED_PROPER, Vocab, load_vocab
 
@@ -278,11 +278,11 @@ def planned_steps(counts: PartCounts) -> list[str]:
         steps.append("阅读 長文")
     if counts.writing_p1:
         steps.append("連詞成句")
-    if counts.writing_p2:
+    if counts.writing_keywords or counts.writing_picture:
         steps.append("作文の課題")
     if counts.listening_total:
         steps.append("音声合成")
-    if counts.writing_p2 >= 1:
+    if counts.writing_picture:
         steps.append("看图の画像")
     steps.append("保存")
     return steps
@@ -323,13 +323,16 @@ def generate_exam(
     size: int,
     *,
     mode: str = "full",
+    parts: dict[str, int] | None = None,
     llm: LLM | None = None,
     report: ReportFn | None = None,
 ) -> Exam:
     llm = llm or GrokLLM()
     vocab = load_vocab()
     name_pool = shuffle_proper_names()
-    counts = counts_for(size, mode)
+    counts = counts_for(size=size, parts=parts)
+    if parts is not None:
+        mode = "custom"
     created = now_iso()
     clips: list[ListeningClip] = []
     listening: list[McqItem] = []
@@ -475,16 +478,16 @@ def generate_exam(
         )
         return SentenceOrderItem(id=new_id(), words=list(raw.words), gold=raw.gold), _theme(raw.gold)
 
-    def build_essay(i: int, n: int, avoid: list[str]) -> tuple[EssayItem, str]:
-        # full: last writing_p2 slot is 看图; picture mode: every slot is 看图.
-        if mode != "picture" and i < n - 1:
-            kw = _parse(
-                llm,
-                KeywordsOut,
-                vocab,
-                _user(5, vocab, "Five related HSK5 words for an 80-character essay.", avoid),
-            )
-            return EssayItem(id=new_id(), kind="keywords", required_words=list(kw.words)[:5]), _theme(*kw.words)
+    def build_keywords(i: int, n: int, avoid: list[str]) -> tuple[EssayItem, str]:
+        kw = _parse(
+            llm,
+            KeywordsOut,
+            vocab,
+            _user(5, vocab, "Five related HSK5 words for an 80-character essay.", avoid),
+        )
+        return EssayItem(id=new_id(), kind="keywords", required_words=list(kw.words)[:5]), _theme(*kw.words)
+
+    def build_picture(i: int, n: int, avoid: list[str]) -> tuple[EssayItem, str]:
         pic = _parse(
             llm,
             PictureOut,
@@ -507,8 +510,12 @@ def generate_exam(
     reading.extend(_run_part(counts.reading_p2, label="阅读 短文", note=note, used=used, build=build_rp2))
     reading.extend(_run_part(counts.reading_p3, label="阅读 長文", note=note, used=used, build=build_rp3))
     sentences.extend(_run_part(counts.writing_p1, label="連詞成句", note=note, used=used, build=build_wp1))
-    if counts.writing_p2:
-        essays.extend(_run_part(counts.writing_p2, label="作文の課題", note=note, used=used, build=build_essay))
+    if counts.writing_keywords:
+        essays.extend(
+            _run_part(counts.writing_keywords, label="作文の課題", note=note, used=used, build=build_keywords)
+        )
+    if counts.writing_picture:
+        essays.extend(_run_part(counts.writing_picture, label="作文の課題", note=note, used=used, build=build_picture))
 
     if len(listening) != counts.listening_total:
         raise RuntimeError("listening count mismatch")

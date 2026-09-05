@@ -91,24 +91,23 @@ def app_css() -> FileResponse:
 
 
 @app.get("/api/scale")
-def scale_preview(size: int = 10, mode: str = "full") -> dict[str, object]:
+def scale_preview(size: int = 10) -> dict[str, object]:
     from hsk5.scale import counts_for
 
-    if mode not in ("full", "picture"):
-        raise HTTPException(400, "bad mode")
     try:
-        c = counts_for(size, mode)
+        c = counts_for(size=size)
     except ValueError as e:
         raise HTTPException(400, str(e)) from None
     return {
         "size": c.size,
-        "mode": mode,
         "listening_p1": c.listening_p1,
         "listening_p2": c.listening_p2,
         "reading_p1": c.reading_p1,
         "reading_p2": c.reading_p2,
         "reading_p3": c.reading_p3,
         "writing_p1": c.writing_p1,
+        "writing_keywords": c.writing_keywords,
+        "writing_picture": c.writing_picture,
         "writing_p2": c.writing_p2,
         "listening_total": c.listening_total,
         "reading_total": c.reading_total,
@@ -122,8 +121,12 @@ def scale_preview(size: int = 10, mode: str = "full") -> dict[str, object]:
 @app.post("/api/exams")
 def create_exam(body: CreateIn, bg: BackgroundTasks) -> dict[str, str]:
     exam_id = new_id()
-    store.create_exam_row(exam_id, body.size, body.mode)
-    bg.add_task(jobs.run_generate, exam_id, body.size, mode=body.mode)
+    mode = body.resolved_mode()
+    store.create_exam_row(exam_id, body.size, mode)
+    parts = None
+    if body.parts is not None:
+        parts = body.parts.model_dump()
+    bg.add_task(jobs.run_generate, exam_id, body.size, mode=mode, parts=parts)
     return {"id": exam_id, "status": "generating"}
 
 

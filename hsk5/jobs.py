@@ -19,8 +19,15 @@ def _public_error(exc: BaseException) -> str:
     return "generation failed"
 
 
-def run_generate(exam_id: str, size: int, *, mode: str = "full", llm: LLM | None = None) -> None:
-    steps = planned_steps(counts_for(size, mode))
+def run_generate(
+    exam_id: str,
+    size: int,
+    *,
+    mode: str = "full",
+    parts: dict[str, int] | None = None,
+    llm: LLM | None = None,
+) -> None:
+    steps: list[str] = []
 
     def report(label: str, detail: str = "") -> None:
         index = steps.index(label) + 1 if label in steps else 0
@@ -34,10 +41,11 @@ def run_generate(exam_id: str, size: int, *, mode: str = "full", llm: LLM | None
         )
 
     try:
+        steps = planned_steps(counts_for(size=size, parts=parts))
         report("準備")
         if store.is_cancelled(exam_id):
             raise ExamCancelled()
-        exam = generate.generate_exam(exam_id, size, mode=mode, llm=llm or GrokLLM(), report=report)
+        exam = generate.generate_exam(exam_id, size, mode=mode, parts=parts, llm=llm or GrokLLM(), report=report)
         if store.is_cancelled(exam_id):
             raise ExamCancelled()
         generate.attach_media(exam, report=report)
