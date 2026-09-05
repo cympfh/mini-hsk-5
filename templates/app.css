@@ -310,3 +310,9 @@ img.pic { max-width: 100%; border: 1px solid #111; }
 .review-choice.picked { box-shadow: inset 3px 0 0 #111; }
 .review-choice em { float: right; font-style: normal; font-size: 12px; color: var(--mute); margin-left: 8px; }
 .review-essay { white-space: pre-wrap; }
+
+
+.history-btn { margin-left: 0.5rem; }
+.attempt-list { list-style: none; padding: 0.5rem 0 0; margin: 0; }
+.attempt-list li { margin: 0.25rem 0; }
+button.linkish { background: none; border: none; color: #1a5fb4; cursor: pointer; padding: 0; text-decoration: underline; font: inherit; }

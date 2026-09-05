@@ -160,6 +160,37 @@ def cancel_exam(exam_id: str) -> dict[str, str]:
         raise HTTPException(409, f"exam is {e.status}") from None
 
 
+@app.get("/api/exams/{exam_id}/attempts")
+def list_exam_attempts(exam_id: str) -> list[dict[str, object]]:
+    _require_id(exam_id)
+    try:
+        return store.list_attempts(exam_id)
+    except KeyError:
+        raise HTTPException(404, "exam not found") from None
+
+
+@app.get("/api/attempts/{attempt_id}")
+def get_attempt_review(attempt_id: str) -> dict[str, object]:
+    _require_id(attempt_id)
+    try:
+        payload = store.load_attempt_review(attempt_id)
+    except KeyError:
+        raise HTTPException(404, "attempt not found") from None
+    except ExamNotReady as e:
+        raise HTTPException(409, f"attempt is {e.status}") from None
+    exam = payload["exam"]
+    public = exam.to_public(prefix=_prefix())
+    return {
+        "id": payload["id"],
+        "exam_id": payload["exam_id"],
+        "started_at": payload["started_at"],
+        "submitted_at": payload["submitted_at"],
+        "overtime": payload["overtime"],
+        "exam": public,
+        "result": payload["result"],
+    }
+
+
 @app.post("/api/exams/{exam_id}/attempts")
 def start(exam_id: str) -> dict[str, object]:
     _require_id(exam_id)

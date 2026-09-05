@@ -214,6 +214,56 @@ def start_attempt(exam_id: str) -> dict[str, Any]:
     }
 
 
+def list_attempts(exam_id: str) -> list[dict[str, Any]]:
+    if get_exam_row(exam_id) is None:
+        raise KeyError(exam_id)
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, exam_id, started_at, submitted_at, total, listening, reading, writing, overtime
+            FROM attempts
+            WHERE exam_id = ? AND submitted_at IS NOT NULL
+            ORDER BY submitted_at DESC
+            """,
+            (exam_id,),
+        ).fetchall()
+    return [
+        {
+            "id": r["id"],
+            "exam_id": r["exam_id"],
+            "started_at": r["started_at"],
+            "submitted_at": r["submitted_at"],
+            "total": r["total"],
+            "listening": r["listening"],
+            "reading": r["reading"],
+            "writing": r["writing"],
+            "overtime": bool(r["overtime"]),
+        }
+        for r in rows
+    ]
+
+
+def load_attempt_review(attempt_id: str) -> dict[str, Any]:
+    row = get_attempt(attempt_id)
+    if row is None:
+        raise KeyError(attempt_id)
+    if not row["submitted_at"]:
+        raise ExamNotReady("open", attempt_id)
+    if not row["result_json"]:
+        raise ExamNotReady("incomplete", attempt_id)
+    result = json.loads(row["result_json"])
+    exam = load_exam(row["exam_id"])
+    return {
+        "id": row["id"],
+        "exam_id": row["exam_id"],
+        "started_at": row["started_at"],
+        "submitted_at": row["submitted_at"],
+        "overtime": bool(row["overtime"]),
+        "exam": exam,
+        "result": result,
+    }
+
+
 def get_attempt(attempt_id: str) -> sqlite3.Row | None:
     with _connect() as conn:
         return conn.execute("SELECT * FROM attempts WHERE id = ?", (attempt_id,)).fetchone()

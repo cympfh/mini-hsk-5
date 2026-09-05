@@ -28,7 +28,7 @@
   function Hsk5() {}
 
   Hsk5.boot = function (root) {
-    var state = { view: "list", exams: [], exam: null, attempt: null, answers: { mcq: {}, sentence: {}, essay: {} }, result: null, size: 10, section: "listening", remain: 0, timer: null };
+    var state = { view: "list", exams: [], exam: null, attempt: null, answers: { mcq: {}, sentence: {}, essay: {} }, result: null, size: 10, section: "listening", remain: 0, timer: null, historyExamId: null, historyAttempts: [], reviewMeta: null };
     var BASE = "";
     (function () {
       var scripts = global.document.getElementsByTagName("script");
@@ -162,6 +162,36 @@
       submit();
     }
 
+    function loadHistory(examId) {
+      if (state.historyExamId === examId) {
+        state.historyExamId = null;
+        state.historyAttempts = [];
+        render();
+        return;
+      }
+      api("/api/exams/" + examId + "/attempts").then(function (rows) {
+        state.historyExamId = examId;
+        state.historyAttempts = rows || [];
+        render();
+      }).catch(function (e) {
+        state.error = String(e.message || e);
+        render();
+      });
+    }
+
+    function openReview(attemptId) {
+      api("/api/attempts/" + attemptId).then(function (j) {
+        state.exam = j.exam;
+        state.result = j.result;
+        state.reviewMeta = { id: j.id, submitted_at: j.submitted_at };
+        state.view = "result";
+        render();
+      }).catch(function (e) {
+        state.error = String(e.message || e);
+        render();
+      });
+    }
+
     function submit() {
       if (state.timer) global.clearInterval(state.timer);
       api("/api/attempts/" + state.attempt.attempt_id + "/submit", {
@@ -186,6 +216,18 @@
         var action;
         if (e.status === "ready") {
           action = "<button class=\"primary start-btn\" data-start=\"" + e.id + "\">試験開始</button>";
+          action += " <button class=\"history-btn\" data-history=\"" + e.id + "\">過去の回答</button>";
+          if (state.historyExamId === e.id) {
+            if (!state.historyAttempts.length) {
+              action += "<p class=\"hint\">提出済みの回答はまだない。</p>";
+            } else {
+              action += "<ul class=\"attempt-list\">" + state.historyAttempts.map(function (a) {
+                return "<li><button class=\"linkish review-btn\" data-review=\"" + a.id + "\">" +
+                  (a.submitted_at || a.id) + "　总分 " + fmt(a.total) +
+                  (a.overtime ? " · 超时" : "") + "</button></li>";
+              }).join("") + "</ul>";
+            }
+          }
         } else if (e.status === "generating") {
           var p = e.progress && typeof e.progress === "object" ? e.progress : null;
           var lab = p ? (p.label || "") + (p.detail ? " " + p.detail : "") : "";
@@ -210,6 +252,12 @@
       $("#make", root).addEventListener("click", createExam);
       root.querySelectorAll("[data-start]").forEach(function (b) {
         b.addEventListener("click", function () { begin(b.getAttribute("data-start")); });
+      });
+      root.querySelectorAll("[data-history]").forEach(function (b) {
+        b.addEventListener("click", function () { loadHistory(b.getAttribute("data-history")); });
+      });
+      root.querySelectorAll("[data-review]").forEach(function (b) {
+        b.addEventListener("click", function () { openReview(b.getAttribute("data-review")); });
       });
     }
 
@@ -422,7 +470,9 @@
     function renderResult() {
       var r = state.result;
       root.innerHTML =
-        "<div class=\"admit\"><span>成绩报告 · 復習</span><strong>" + state.exam.id + "</strong></div>" +
+        "<div class=\"admit\"><span>成绩报告 · 復習</span><strong>" + state.exam.id +
+        (state.reviewMeta && state.reviewMeta.submitted_at ? " · " + state.reviewMeta.submitted_at : "") +
+        "</strong></div>" +
         "<div class=\"scores\">" +
         "<div>听力<strong>" + fmt(r.listening) + "</strong></div>" +
         "<div>阅读<strong>" + fmt(r.reading) + "</strong></div>" +
@@ -433,6 +483,7 @@
         "<div class=\"row\"><button id=\"back\">返回一览</button></div>";
       $("#back", root).addEventListener("click", function () {
         state.view = "list";
+        state.reviewMeta = null;
         loadList();
       });
     }
