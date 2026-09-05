@@ -21,7 +21,7 @@ from hsk5.models import (
     SentenceOrderItem,
     SpeakerLine,
 )
-from hsk5.scale import PartCounts, scale_counts
+from hsk5.scale import PartCounts, counts_for, scale_counts
 from hsk5.store import now_iso
 from hsk5.vocab import ALLOWED_PROPER, Vocab, load_vocab
 
@@ -318,11 +318,18 @@ def _listening_pair(
     return (clip, item), _theme(question, *(ln.text for ln in lines))
 
 
-def generate_exam(exam_id: str, size: int, *, llm: LLM | None = None, report: ReportFn | None = None) -> Exam:
+def generate_exam(
+    exam_id: str,
+    size: int,
+    *,
+    mode: str = "full",
+    llm: LLM | None = None,
+    report: ReportFn | None = None,
+) -> Exam:
     llm = llm or GrokLLM()
     vocab = load_vocab()
     name_pool = shuffle_proper_names()
-    counts = scale_counts(size)
+    counts = counts_for(size, mode)
     created = now_iso()
     clips: list[ListeningClip] = []
     listening: list[McqItem] = []
@@ -469,8 +476,8 @@ def generate_exam(exam_id: str, size: int, *, llm: LLM | None = None, report: Re
         return SentenceOrderItem(id=new_id(), words=list(raw.words), gold=raw.gold), _theme(raw.gold)
 
     def build_essay(i: int, n: int, avoid: list[str]) -> tuple[EssayItem, str]:
-        # Last writing_p2 slot is always 看图 so mid sizes (wp2==1, e.g. 50%) still get it.
-        if i < n - 1:
+        # full: last writing_p2 slot is 看图; picture mode: every slot is 看图.
+        if mode != "picture" and i < n - 1:
             kw = _parse(
                 llm,
                 KeywordsOut,
@@ -484,8 +491,9 @@ def generate_exam(exam_id: str, size: int, *, llm: LLM | None = None, report: Re
             vocab,
             _user(1, vocab, "English photo prompt of a simple everyday scene. No text in the image.", avoid),
         )
+        img = f"writing-{i + 1}.png"
         return (
-            EssayItem(id=new_id(), kind="picture", image_prompt=pic.prompt, image_name="writing.png"),
+            EssayItem(id=new_id(), kind="picture", image_prompt=pic.prompt, image_name=img),
             _theme(pic.prompt),
         )
 
@@ -514,6 +522,7 @@ def generate_exam(exam_id: str, size: int, *, llm: LLM | None = None, report: Re
         id=exam_id,
         size=size,
         created_at=created,
+        mode=mode,
         counts=counts,
         clips=clips,
         listening=listening,

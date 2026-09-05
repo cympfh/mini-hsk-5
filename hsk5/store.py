@@ -60,6 +60,10 @@ def _connect() -> sqlite3.Connection:
         )
         """)
     conn.commit()
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(exams)").fetchall()}
+    if "mode" not in cols:
+        conn.execute("ALTER TABLE exams ADD COLUMN mode TEXT NOT NULL DEFAULT 'full'")
+        conn.commit()
     return conn
 
 
@@ -74,12 +78,12 @@ def exam_dir(exam_id: str, *, create: bool = True) -> Path:
     return d
 
 
-def create_exam_row(exam_id: str, size: int) -> None:
+def create_exam_row(exam_id: str, size: int, mode: str = "full") -> None:
     created = now_iso()
     with _connect() as conn:
         conn.execute(
-            "INSERT INTO exams (id, size, created_at, status, progress) VALUES (?, ?, ?, ?, ?)",
-            (exam_id, size, created, "generating", "queued"),
+            "INSERT INTO exams (id, size, created_at, status, progress, mode) VALUES (?, ?, ?, ?, ?, ?)",
+            (exam_id, size, created, "generating", "queued", mode),
         )
         conn.commit()
     exam_dir(exam_id)
@@ -176,6 +180,7 @@ def list_exams() -> list[dict[str, Any]]:
         {
             "id": r["id"],
             "size": r["size"],
+            "mode": r["mode"] if "mode" in r.keys() else "full",
             "created_at": r["created_at"],
             "status": r["status"],
             "progress": parse_progress(r["progress"]),

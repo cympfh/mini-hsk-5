@@ -84,6 +84,7 @@ def make_exam(size: int = 10, exam_id: str | None = None) -> Exam:
         id=eid,
         size=size,
         created_at=now_iso(),
+        mode="full",
         counts=counts,
         clips=clips,
         listening=listening,

@@ -60,6 +60,7 @@ class Exam(BaseModel):
     id: str
     size: int
     created_at: str
+    mode: str = "full"
     counts: PartCounts
     clips: list[ListeningClip] = Field(default_factory=list)
     listening: list[McqItem] = Field(default_factory=list)
@@ -102,6 +103,7 @@ class Exam(BaseModel):
         return {
             "id": self.id,
             "size": self.size,
+            "mode": self.mode,
             "created_at": self.created_at,
             "status": "ready",
             "limits": {
@@ -136,7 +138,14 @@ class SubmitIn(BaseModel):
 
 class CreateIn(BaseModel):
     size: int = Field(default=10, ge=1, le=100)
+    mode: Literal["full", "picture"] = "full"
+
+    def model_post_init(self, __context: Any) -> None:
+        if self.mode == "picture" and not (1 <= self.size <= 20):
+            raise ValueError("picture mode size must be 1..20")
 
 
-def counts_from_exam_size(size: int) -> PartCounts:
-    return scale_counts(size)
+def counts_from_exam_size(size: int, mode: str = "full") -> PartCounts:
+    from hsk5.scale import counts_for
+
+    return counts_for(size, mode)

@@ -5,7 +5,7 @@ import logging
 from hsk5 import generate, store
 from hsk5.store import ExamCancelled
 from hsk5.generate import GrokLLM, LLM, planned_steps
-from hsk5.scale import scale_counts
+from hsk5.scale import counts_for
 
 log = logging.getLogger(__name__)
 
@@ -19,8 +19,8 @@ def _public_error(exc: BaseException) -> str:
     return "generation failed"
 
 
-def run_generate(exam_id: str, size: int, *, llm: LLM | None = None) -> None:
-    steps = planned_steps(scale_counts(size))
+def run_generate(exam_id: str, size: int, *, mode: str = "full", llm: LLM | None = None) -> None:
+    steps = planned_steps(counts_for(size, mode))
 
     def report(label: str, detail: str = "") -> None:
         index = steps.index(label) + 1 if label in steps else 0
@@ -37,7 +37,7 @@ def run_generate(exam_id: str, size: int, *, llm: LLM | None = None) -> None:
         report("準備")
         if store.is_cancelled(exam_id):
             raise ExamCancelled()
-        exam = generate.generate_exam(exam_id, size, llm=llm or GrokLLM(), report=report)
+        exam = generate.generate_exam(exam_id, size, mode=mode, llm=llm or GrokLLM(), report=report)
         if store.is_cancelled(exam_id):
             raise ExamCancelled()
         generate.attach_media(exam, report=report)

@@ -90,11 +90,40 @@ def app_css() -> FileResponse:
     return FileResponse(TEMPLATES / "app.css", media_type="text/css")
 
 
+@app.get("/api/scale")
+def scale_preview(size: int = 10, mode: str = "full") -> dict[str, object]:
+    from hsk5.scale import counts_for
+
+    if mode not in ("full", "picture"):
+        raise HTTPException(400, "bad mode")
+    try:
+        c = counts_for(size, mode)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
+    return {
+        "size": c.size,
+        "mode": mode,
+        "listening_p1": c.listening_p1,
+        "listening_p2": c.listening_p2,
+        "reading_p1": c.reading_p1,
+        "reading_p2": c.reading_p2,
+        "reading_p3": c.reading_p3,
+        "writing_p1": c.writing_p1,
+        "writing_p2": c.writing_p2,
+        "listening_total": c.listening_total,
+        "reading_total": c.reading_total,
+        "writing_total": c.writing_total,
+        "listening_minutes": c.listening_minutes,
+        "reading_minutes": c.reading_minutes,
+        "writing_minutes": c.writing_minutes,
+    }
+
+
 @app.post("/api/exams")
 def create_exam(body: CreateIn, bg: BackgroundTasks) -> dict[str, str]:
     exam_id = new_id()
-    store.create_exam_row(exam_id, body.size)
-    bg.add_task(jobs.run_generate, exam_id, body.size)
+    store.create_exam_row(exam_id, body.size, body.mode)
+    bg.add_task(jobs.run_generate, exam_id, body.size, mode=body.mode)
     return {"id": exam_id, "status": "generating"}
 
 
@@ -114,6 +143,7 @@ def get_exam(exam_id: str) -> JSONResponse:
             {
                 "id": exam_id,
                 "size": row["size"],
+                "mode": row["mode"] if "mode" in row.keys() else "full",
                 "status": row["status"],
                 "progress": store.parse_progress(row["progress"]),
                 "error": row["error"],

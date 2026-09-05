@@ -124,3 +124,28 @@ def score_weights(counts: PartCounts) -> ScoreWeights:
         writing_p1=p1,
         writing_p2=p2,
     )
+
+
+def picture_counts(n: int) -> PartCounts:
+    """Practice mode: only picture essays. size means how many pictures (1..20)."""
+    if n < 1 or n > 20:
+        raise ValueError("picture count must be 1..20")
+    return PartCounts(
+        size=n,
+        listening_p1=0,
+        listening_p2=0,
+        reading_p1=0,
+        reading_p2=0,
+        reading_p3=0,
+        writing_p1=0,
+        writing_p2=n,
+        listening_minutes=0,
+        reading_minutes=0,
+        writing_minutes=max(5, min(40, n * 8)),
+    )
+
+
+def counts_for(size: int, mode: str = "full") -> PartCounts:
+    if mode == "picture":
+        return picture_counts(size)
+    return scale_counts(size)
