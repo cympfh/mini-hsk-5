@@ -488,12 +488,20 @@ def attach_media(exam: Exam, report: ReportFn | None = None) -> None:
 
     def one_clip(i: int) -> None:
         clip = exam.clips[i]
-        spoken = [ln.text for ln in clip.lines]
+        chunks: list[bytes] = []
+        for ln in clip.lines:
+            part = tts.synth(ln.text, tts.voice_for(ln.speaker))
+            if len(part) < 16:
+                raise RuntimeError("empty audio")
+            chunks.append(part)
         if clip.question_text:
-            spoken.append(clip.question_text)
-        audio = tts.synth("\n".join(spoken), tts.voice_for("NARR"))
-        if len(audio) < 16:
+            part = tts.synth(clip.question_text, tts.voice_for("NARR"))
+            if len(part) < 16:
+                raise RuntimeError("empty audio")
+            chunks.append(part)
+        if not chunks:
             raise RuntimeError("empty audio")
+        audio = b"".join(chunks)
         store.audio_path(exam.id, clip.id).write_bytes(audio)
 
     _parallel_map(len(exam.clips), one_clip, label="音声合成", note=note)
