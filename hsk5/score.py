@@ -95,14 +95,21 @@ def score_exam(
         pts = weights.listening[i] if i < len(weights.listening) else 0.0
         got = score_mcq_item(item, mcq_in.get(item.id), pts)
         listening_total += got
+        clip = next((c for c in exam.clips if c.id == item.clip_id), None)
         listening_items.append(
             {
                 "id": item.id,
+                "part": item.part,
                 "correct": got > 0,
                 "answer": item.answer,
                 "given": mcq_in.get(item.id),
                 "points": got,
+                "max_points": pts,
+                "clip_id": item.clip_id,
+                "choices": [ch.model_dump() for ch in item.choices],
                 "transcript": item.transcript,
+                "lines": ([{"speaker": ln.speaker, "text": ln.text} for ln in clip.lines] if clip else []),
+                "question_text": clip.question_text if clip else "",
             }
         )
     reading_items: list[dict[str, Any]] = []
@@ -114,10 +121,15 @@ def score_exam(
         reading_items.append(
             {
                 "id": item.id,
+                "part": item.part,
                 "correct": got > 0,
                 "answer": item.answer,
                 "given": mcq_in.get(item.id),
                 "points": got,
+                "max_points": pts,
+                "prompt": item.prompt,
+                "passage": item.passage,
+                "choices": [ch.model_dump() for ch in item.choices],
             }
         )
     writing_total = 0.0
@@ -132,6 +144,8 @@ def score_exam(
                 "gold": item.gold,
                 "given": sent_in.get(item.id),
                 "points": got,
+                "max_points": weights.writing_p1,
+                "words": list(item.words),
             }
         )
     essay_items: list[dict[str, Any]] = []
@@ -149,10 +163,13 @@ def score_exam(
                 "band": guarded.band,
                 "raw_score": guarded.score,
                 "points": got,
+                "max_points": weights.writing_p2,
                 "char_count": guarded.char_count,
                 "used_required_words": guarded.used_required_words,
+                "required_words": list(item.required_words),
                 "comment_ja": guarded.comment_ja,
                 "given": text,
+                "image_name": item.image_name,
             }
         )
     return {

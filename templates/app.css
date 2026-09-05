@@ -294,3 +294,19 @@ img.pic { max-width: 100%; border: 1px solid #111; }
   .scores { grid-template-columns: 1fr 1fr; }
   .bubbles label { min-width: 100%; }
 }
+
+
+.review-item { border: 1px solid var(--rule); padding: 12px; margin: 12px 0; background: #fff; }
+.review-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+.review-mark { font-size: 13px; font-weight: 700; padding: 2px 8px; border: 1px solid #111; }
+.review-mark.ok { background: #e8f5e9; border-color: #2e7d32; color: #1b5e20; }
+.review-mark.bad { background: #ffebee; border-color: #c62828; color: #b71c1c; }
+.review-audio { display: block; width: 100%; margin: 8px 0; }
+.review-script p { margin: 0.2em 0; }
+.review-choices { display: grid; gap: 6px; margin-top: 8px; }
+.review-choice { border: 1px solid var(--rule); padding: 8px 10px; background: #fff; }
+.review-choice.ok { border-color: #2e7d32; background: #e8f5e9; }
+.review-choice.bad { border-color: #c62828; background: #ffebee; }
+.review-choice.picked { box-shadow: inset 3px 0 0 #111; }
+.review-choice em { float: right; font-style: normal; font-size: 12px; color: var(--mute); margin-left: 8px; }
+.review-essay { white-space: pre-wrap; }

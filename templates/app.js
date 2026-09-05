@@ -320,34 +320,100 @@
       $("#next", root).addEventListener("click", nextSection);
     }
 
+    function reviewChoices(it) {
+      var choices = it.choices || [];
+      if (!choices.length) return "";
+      return "<div class=\"review-choices\">" + choices.map(function (c) {
+        var cls = "review-choice";
+        if (c.key === it.answer) cls += " ok";
+        if (it.given && c.key === it.given && c.key !== it.answer) cls += " bad";
+        if (it.given && c.key === it.given) cls += " picked";
+        var tag = "";
+        if (c.key === it.answer) tag += "<em>正解</em>";
+        if (it.given && c.key === it.given) tag += "<em>あなたの答</em>";
+        return "<div class=\"" + cls + "\"><b>" + c.key + "</b> " + c.text + tag + "</div>";
+      }).join("") + "</div>";
+    }
+
+    function reviewMark(it) {
+      return "<span class=\"review-mark " + (it.correct ? "ok" : "bad") + "\">" +
+        (it.correct ? "正解" : "不正解") + "</span>";
+    }
+
     function reviewHtml(r) {
+      var examId = state.exam && state.exam.id;
       var html = "";
-      function mcqBlock(title, items) {
-        if (!items || !items.length) return "";
-        var rows = items.map(function (it, i) {
-          return "<div class=\"item\"><span class=\"qno\">" + (i + 1) + "</span>" +
-            (it.correct ? "正" : "誤") + "　答 " + (it.answer || "") +
-            (it.transcript ? "<div class=\"passage\">" + it.transcript + "</div>" : "") +
-            (it.comment_ja ? "<p class=\"hint\">" + it.comment_ja + "</p>" : "") +
-            "</div>";
-        }).join("");
-        return "<div class=\"section-h\"><h2>" + title + "</h2></div>" + rows;
+      if (r.listening_items && r.listening_items.length) {
+        html += "<div class=\"section-h\"><h2>听力 復習</h2></div>";
+        r.listening_items.forEach(function (it, i) {
+          html += "<div class=\"item review-item\">";
+          html += "<div class=\"review-head\"><span class=\"qno\">" + (i + 1) + "</span>" + reviewMark(it);
+          html += "<span class=\"hint\">" + fmt(it.points) + " / " + fmt(it.max_points != null ? it.max_points : it.points) + " 点</span></div>";
+          if (it.clip_id && examId) {
+            html += "<audio class=\"review-audio\" controls src=\"" + BASE + "/api/exams/" + examId + "/audio/" + it.clip_id + "\"></audio>";
+          }
+          if (it.lines && it.lines.length) {
+            html += "<div class=\"review-script passage\">" + it.lines.map(function (ln) {
+              return "<p><b>" + ln.speaker + "</b> " + ln.text + "</p>";
+            }).join("") +
+              (it.question_text ? "<p><b>NARR</b> " + it.question_text + "</p>" : "") +
+              "</div>";
+          } else if (it.transcript) {
+            html += "<div class=\"review-script passage\">" + it.transcript + "</div>";
+          }
+          html += "<p class=\"hint\">あなたの答: " + (it.given || "（未回答）") + "　正解: " + (it.answer || "") + "</p>";
+          html += reviewChoices(it);
+          html += "</div>";
+        });
       }
-      html += mcqBlock("听力 回顾", r.listening_items);
-      html += mcqBlock("阅读 回顾", r.reading_items);
+      if (r.reading_items && r.reading_items.length) {
+        html += "<div class=\"section-h\"><h2>阅读 復習</h2></div>";
+        r.reading_items.forEach(function (it, i) {
+          html += "<div class=\"item review-item\">";
+          html += "<div class=\"review-head\"><span class=\"qno\">" + (i + 1) + "</span>" + reviewMark(it);
+          html += "<span class=\"hint\">" + fmt(it.points) + " / " + fmt(it.max_points != null ? it.max_points : it.points) + " 点</span></div>";
+          if (it.passage) html += "<div class=\"passage\">" + it.passage + "</div>";
+          if (it.prompt) html += "<p>" + it.prompt + "</p>";
+          html += "<p class=\"hint\">あなたの答: " + (it.given || "（未回答）") + "　正解: " + (it.answer || "") + "</p>";
+          html += reviewChoices(it);
+          html += "</div>";
+        });
+      }
       if (r.sentence_items && r.sentence_items.length) {
-        html += "<div class=\"section-h\"><h2>连词成句</h2></div>";
+        html += "<div class=\"section-h\"><h2>连词成句 復習</h2></div>";
         r.sentence_items.forEach(function (it, i) {
-          html += "<div class=\"item\"><span class=\"qno\">" + (i + 1) + "</span>" +
-            (it.correct ? "正" : "誤") + "　" + (it.gold || "") + "</div>";
+          html += "<div class=\"item review-item\">";
+          html += "<div class=\"review-head\"><span class=\"qno\">" + (i + 1) + "</span>" + reviewMark(it) + "</div>";
+          if (it.words && it.words.length) {
+            html += "<p class=\"hint\">語: " + it.words.join(" / ") + "</p>";
+          }
+          html += "<p>あなたの並び: <b>" + (it.given || "（未回答）") + "</b></p>";
+          html += "<p>正解: <b>" + (it.gold || "") + "</b></p>";
+          html += "</div>";
         });
       }
       if (r.essay_items && r.essay_items.length) {
-        html += "<div class=\"section-h\"><h2>作文</h2></div>";
+        html += "<div class=\"section-h\"><h2>作文 復習</h2></div>";
         r.essay_items.forEach(function (it, i) {
-          html += "<div class=\"item\"><span class=\"qno\">" + (i + 1) + "</span>" +
-            (it.band || "") + "　" + fmt(it.points) + "点" +
-            (it.comment_ja ? "<p>" + it.comment_ja + "</p>" : "") + "</div>";
+          html += "<div class=\"item review-item\">";
+          html += "<div class=\"review-head\"><span class=\"qno\">" + (i + 1) + "</span>";
+          html += "<span class=\"review-mark\">" + (it.band || "") + "</span>";
+          html += "<span class=\"hint\">" + fmt(it.points) + " / " + fmt(it.max_points != null ? it.max_points : it.points) + " 点</span></div>";
+          if (it.kind === "keywords") {
+            html += "<p>指定語: <b>" + ((it.required_words || []).join("、") || "—") + "</b></p>";
+          }
+          if (it.kind === "picture") {
+            html += "<p>根据图片写短文。</p>";
+            if (it.image_name && examId) {
+              html += "<img class=\"pic\" alt=\"看图\" src=\"" + BASE + "/api/exams/" + examId + "/images/" + it.image_name + "\">";
+            }
+          }
+          html += "<div class=\"passage review-essay\">" + (it.given ? it.given : "（未記入）") + "</div>";
+          if (it.comment_ja) html += "<p>" + it.comment_ja + "</p>";
+          if (it.used_required_words && it.used_required_words.length) {
+            html += "<p class=\"hint\">使った指定語: " + it.used_required_words.join("、") + "</p>";
+          }
+          html += "</div>";
         });
       }
       return html;
@@ -356,7 +422,7 @@
     function renderResult() {
       var r = state.result;
       root.innerHTML =
-        "<div class=\"admit\"><span>成绩报告</span><strong>" + state.exam.id + "</strong></div>" +
+        "<div class=\"admit\"><span>成绩报告 · 復習</span><strong>" + state.exam.id + "</strong></div>" +
         "<div class=\"scores\">" +
         "<div>听力<strong>" + fmt(r.listening) + "</strong></div>" +
         "<div>阅读<strong>" + fmt(r.reading) + "</strong></div>" +

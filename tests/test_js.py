@@ -26,6 +26,9 @@ def test_no_frontend_frameworks() -> None:
     assert "data-start" in js
     assert "gen-elapsed" in js
     assert "bar" in (TEMPLATES / "app.css").read_text()
+    assert "review-choice" in (TEMPLATES / "app.css").read_text()
+    assert "review-script" in js
+    assert "data-review-audio" in js or "review-audio" in js
 
 
 def test_app_js_runs_in_window() -> None:

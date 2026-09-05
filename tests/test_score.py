@@ -74,3 +74,34 @@ def test_score_exam_perfect() -> None:
     if exam.sentence_order or exam.essays:
         assert result["writing"] > 0
         assert result["total"] > 0
+
+
+def test_score_exam_review_payload() -> None:
+    exam = make_exam(10)
+    mcq = {it.id: "B" for it in exam.listening + exam.reading}
+    if exam.listening:
+        mcq[exam.listening[0].id] = exam.listening[0].answer
+    sentence = {it.id: "x" for it in exam.sentence_order}
+    essays = {it.id: "短文" for it in exam.essays}
+    grok_out = {it.id: EssayGrokOut(band="low", score=5, char_count=2, comment_ja="memo") for it in exam.essays}
+    result = score_exam(exam, {"mcq": mcq, "sentence": sentence, "essay": essays}, grok_out)
+    if exam.listening:
+        row = result["listening_items"][0]
+        assert row["choices"]
+        assert row["clip_id"]
+        assert "transcript" in row
+        assert "question_text" in row
+        assert "lines" in row
+    if exam.reading:
+        row = result["reading_items"][0]
+        assert "passage" in row
+        assert row["choices"]
+        assert "prompt" in row
+    if exam.sentence_order:
+        row = result["sentence_items"][0]
+        assert row["words"]
+        assert row["gold"]
+    if exam.essays:
+        row = result["essay_items"][0]
+        assert "required_words" in row or row["kind"] == "picture"
+        assert "given" in row
