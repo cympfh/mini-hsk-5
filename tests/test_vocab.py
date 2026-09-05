@@ -16,3 +16,11 @@ def test_oov_detects_unknown_hanzi() -> None:
     assert v.oov("小王去学校。") == []
     oov = v.oov("量子纠缠")
     assert oov
+
+
+def test_oov_allows_plural_men_and_fan() -> None:
+    v = load_vocab()
+    assert v.oov("你们好吗") == []
+    assert v.oov("他们去了学校") == []
+    assert v.oov("孩子们在公园玩") == []
+    assert v.oov("我们一起去吃饭吧。") == []

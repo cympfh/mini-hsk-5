@@ -23,6 +23,15 @@ ALLOWED_PROPER = frozenset(
     }
 )
 
+# Forms missing as standalone entries in the inclusive JSON, but needed for
+# natural HSK text (plural suffix 们; bare 饭 in compounds like 吃饭).
+ALLOWED_EXTRA = frozenset(
+    {
+        "们",
+        "饭",
+    }
+)
+
 
 @dataclass(frozen=True)
 class Vocab:
@@ -49,7 +58,7 @@ class Vocab:
             upper = min(self.max_len, n - i)
             for length in range(upper, 0, -1):
                 piece = text[i : i + length]
-                if piece in self.words or piece in ALLOWED_PROPER:
+                if piece in self.words or piece in ALLOWED_PROPER or piece in ALLOWED_EXTRA:
                     matched = piece
                     break
             if matched is None:

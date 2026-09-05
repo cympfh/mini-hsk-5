@@ -29,6 +29,9 @@ def run_generate(exam_id: str, size: int, *, llm: LLM | None = None) -> None:
         generate.attach_media(exam, report=report)
         report("保存")
         store.save_exam(exam)
-    except Exception:
+    except Exception as e:
         log.exception("generate failed exam_id=%s", exam_id)
-        store.set_status(exam_id, "failed", "generation failed")
+        detail = f"{type(e).__name__}: {e}"
+        if len(detail) > 240:
+            detail = detail[:237] + "..."
+        store.set_status(exam_id, "failed", detail)
