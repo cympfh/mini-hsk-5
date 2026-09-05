@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import random
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -27,7 +28,6 @@ from hsk5.vocab import ALLOWED_PROPER, Vocab, load_vocab
 T = TypeVar("T", bound=BaseModel)
 U = TypeVar("U")
 ReportFn = Callable[[str, str], None]
-_PROPER_NAMES = tuple(sorted(ALLOWED_PROPER))
 SYSTEM = (
     "You write HSK 2.0 Level 5 (五级) exam items. Use only the provided vocabulary "
     "plus allowed Chinese person names from the prompt and digits. Simplified Chinese. "
@@ -38,13 +38,20 @@ SYSTEM = (
 )
 
 
-def _names_for_slot(index: int, k: int = 2) -> list[str]:
-    n = len(_PROPER_NAMES)
+def shuffle_proper_names(rng: random.Random | None = None) -> list[str]:
+    pool = list(ALLOWED_PROPER)
+    (rng or random.Random()).shuffle(pool)
+    return pool
+
+
+def _names_for_slot(index: int, k: int = 2, *, pool: list[str] | None = None) -> list[str]:
+    names = pool if pool is not None else sorted(ALLOWED_PROPER)
+    n = len(names)
     if n == 0:
         return []
     k = min(k, n)
     start = (index * k) % n
-    return [_PROPER_NAMES[(start + j) % n] for j in range(k)]
+    return [names[(start + j) % n] for j in range(k)]
 
 
 def gen_concurrency() -> int:
@@ -179,8 +186,17 @@ def _transcript(lines: list[SpeakerLine], question: str) -> str:
     return body + f"\nNARR: {question}"
 
 
-def _slot_user(vocab: Vocab, extra: str, avoid: list[str], index: int, total: int, *, count: int = 1) -> str:
-    names = "、".join(_names_for_slot(index))
+def _slot_user(
+    vocab: Vocab,
+    extra: str,
+    avoid: list[str],
+    index: int,
+    total: int,
+    *,
+    count: int = 1,
+    name_pool: list[str] | None = None,
+) -> str:
+    names = "、".join(_names_for_slot(index, pool=name_pool))
     slotted = (
         f"{extra} This is empty slot {index + 1} of {total}; invent a distinct situation for this slot only. "
         f"If the item needs person names, use only these for this slot: {names}. "
@@ -305,6 +321,7 @@ def _listening_pair(
 def generate_exam(exam_id: str, size: int, *, llm: LLM | None = None, report: ReportFn | None = None) -> Exam:
     llm = llm or GrokLLM()
     vocab = load_vocab()
+    name_pool = shuffle_proper_names()
     counts = scale_counts(size)
     created = now_iso()
     clips: list[ListeningClip] = []
@@ -329,6 +346,7 @@ def generate_exam(exam_id: str, size: int, *, llm: LLM | None = None, report: Re
                 avoid,
                 i,
                 n,
+                name_pool=name_pool,
             ),
         )
         return _listening_pair(
@@ -351,6 +369,7 @@ def generate_exam(exam_id: str, size: int, *, llm: LLM | None = None, report: Re
                 avoid,
                 i,
                 n,
+                name_pool=name_pool,
             ),
         )
         if not raw.questions:
@@ -370,7 +389,9 @@ def generate_exam(exam_id: str, size: int, *, llm: LLM | None = None, report: Re
             llm,
             ClozePassageOut,
             vocab,
-            _slot_user(vocab, "One short cloze passage with exactly one blank marked ____.", avoid, i, n),
+            _slot_user(
+                vocab, "One short cloze passage with exactly one blank marked ____.", avoid, i, n, name_pool=name_pool
+            ),
         )
         if not passage.blanks:
             raise RuntimeError("cloze missing blank")
@@ -390,7 +411,9 @@ def generate_exam(exam_id: str, size: int, *, llm: LLM | None = None, report: Re
             llm,
             ReadingShortOut,
             vocab,
-            _slot_user(vocab, "One short paragraph. Choose the statement that matches.", avoid, i, n),
+            _slot_user(
+                vocab, "One short paragraph. Choose the statement that matches.", avoid, i, n, name_pool=name_pool
+            ),
         )
         item = McqItem(
             id=new_id(),
@@ -413,6 +436,7 @@ def generate_exam(exam_id: str, size: int, *, llm: LLM | None = None, report: Re
                 avoid,
                 i,
                 n,
+                name_pool=name_pool,
             ),
         )
         if not passage.questions:
@@ -439,6 +463,7 @@ def generate_exam(exam_id: str, size: int, *, llm: LLM | None = None, report: Re
                 avoid,
                 i,
                 n,
+                name_pool=name_pool,
             ),
         )
         return SentenceOrderItem(id=new_id(), words=list(raw.words), gold=raw.gold), _theme(raw.gold)
