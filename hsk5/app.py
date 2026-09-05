@@ -149,6 +149,17 @@ def get_image(exam_id: str, name: str) -> FileResponse:
     return FileResponse(path)
 
 
+@app.post("/api/exams/{exam_id}/cancel")
+def cancel_exam(exam_id: str) -> dict[str, str]:
+    _require_id(exam_id)
+    try:
+        return store.cancel_exam(exam_id)
+    except KeyError:
+        raise HTTPException(404, "exam not found") from None
+    except ExamNotReady as e:
+        raise HTTPException(409, f"exam is {e.status}") from None
+
+
 @app.post("/api/exams/{exam_id}/attempts")
 def start(exam_id: str) -> dict[str, object]:
     _require_id(exam_id)

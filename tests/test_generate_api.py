@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from typing import Any
 
 import pytest
@@ -200,3 +202,65 @@ def test_audio_and_image_served(client: TestClient, stub: StubXAI) -> None:
     assert picture is not None
     img = client.get(picture["image_url"])
     assert img.status_code == 200
+
+
+def test_cancel_generating_exam(client: TestClient, stub: StubXAI, data_dir: Path) -> None:
+    from hsk5 import store
+
+    store.create_exam_row("abcd1234", 10)
+    r = client.post("/api/exams/abcd1234/cancel")
+    assert r.status_code == 200
+    assert r.json() == {"id": "abcd1234", "status": "cancelled"}
+    row = store.get_exam_row("abcd1234")
+    assert row is not None
+    assert row["status"] == "cancelled"
+    assert not (data_dir / "exams" / "abcd1234").exists()
+
+
+def test_cancel_ready_exam_conflict(client: TestClient, stub: StubXAI) -> None:
+    created = client.post("/api/exams", json={"size": 10})
+    exam_id = created.json()["id"]
+    assert client.get(f"/api/exams/{exam_id}").json()["status"] == "ready"
+    r = client.post(f"/api/exams/{exam_id}/cancel")
+    assert r.status_code == 409
+
+
+def test_cancel_unknown_exam_404(client: TestClient, stub: StubXAI) -> None:
+    assert client.post("/api/exams/abcd1234/cancel").status_code == 404
+
+
+def test_generate_aborts_when_cancelled(data_dir: Path, monkeypatch: pytest.MonkeyPatch, stub: StubXAI) -> None:
+    from hsk5 import generate, jobs, store
+    from hsk5.store import ExamCancelled
+
+    store.create_exam_row("abcd1234", 10)
+
+    def boom_mid(*_a: object, **kwargs: object) -> object:
+        store.cancel_exam("abcd1234")
+        report = kwargs.get("report")
+        if callable(report):
+            try:
+                report("听力 第1部分", "1/1")
+            except ExamCancelled:
+                raise
+        raise AssertionError("generate should have aborted via ExamCancelled")
+
+    monkeypatch.setattr(generate, "generate_exam", boom_mid)
+    jobs.run_generate("abcd1234", 10)
+    row = store.get_exam_row("abcd1234")
+    assert row is not None
+    assert row["status"] == "cancelled"
+
+
+def test_save_exam_does_not_revive_cancelled(data_dir: Path, stub: StubXAI) -> None:
+    from hsk5 import store
+    from hsk5.generate import generate_exam
+
+    store.create_exam_row("abcd1234", 10)
+    exam = generate_exam("abcd1234", 10)
+    store.cancel_exam("abcd1234")
+    store.save_exam(exam)
+    row = store.get_exam_row("abcd1234")
+    assert row is not None
+    assert row["status"] == "cancelled"
+    assert not (data_dir / "exams" / "abcd1234").exists()

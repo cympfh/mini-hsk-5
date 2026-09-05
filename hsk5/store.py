@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,6 +10,10 @@ from typing import Any
 from hsk5.ids import is_id, new_id
 from hsk5.models import Exam
 from hsk5.paths import db_path, exams_dir
+
+
+class ExamCancelled(Exception):
+    pass
 
 
 class ExamNotReady(Exception):
@@ -107,6 +112,8 @@ def set_progress_state(
     steps: list[str],
     detail: str = "",
 ) -> None:
+    if is_cancelled(exam_id):
+        raise ExamCancelled()
     pct = 0 if total <= 0 else min(99, int(100 * max(index, 0) / total))
     set_progress(
         exam_id,
@@ -134,9 +141,21 @@ def set_status(exam_id: str, status: str, error: str | None = None) -> None:
 
 
 def save_exam(exam: Exam) -> None:
+    if is_cancelled(exam.id):
+        return
     path = exam_dir(exam.id) / "exam.json"
     path.write_text(exam.model_dump_json(indent=2), encoding="utf-8")
-    set_status(exam.id, "ready")
+    with _connect() as conn:
+        cur = conn.execute(
+            "UPDATE exams SET status = ?, error = ?, progress = ? WHERE id = ? AND status = ?",
+            ("ready", None, "done", exam.id, "generating"),
+        )
+        conn.commit()
+        won = cur.rowcount == 1
+    if not won:
+        d = exam_dir(exam.id, create=False)
+        if d.exists():
+            shutil.rmtree(d, ignore_errors=True)
 
 
 def load_exam(exam_id: str) -> Exam:
@@ -235,6 +254,24 @@ def save_attempt_result(
                 (total, submitted, exam_id),
             )
         conn.commit()
+
+
+def is_cancelled(exam_id: str) -> bool:
+    row = get_exam_row(exam_id)
+    return row is not None and row["status"] == "cancelled"
+
+
+def cancel_exam(exam_id: str) -> dict[str, Any]:
+    row = get_exam_row(exam_id)
+    if row is None:
+        raise KeyError(exam_id)
+    if row["status"] != "generating":
+        raise ExamNotReady(row["status"], exam_id)
+    set_status(exam_id, "cancelled", "cancelled")
+    d = exam_dir(exam_id, create=False)
+    if d.exists():
+        shutil.rmtree(d, ignore_errors=True)
+    return {"id": exam_id, "status": "cancelled"}
 
 
 def audio_path(exam_id: str, clip_id: str, *, create: bool = True) -> Path:

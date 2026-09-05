@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 from hsk5 import generate, store
+from hsk5.store import ExamCancelled
 from hsk5.generate import GrokLLM, LLM, planned_steps
 from hsk5.scale import scale_counts
 
@@ -34,10 +35,18 @@ def run_generate(exam_id: str, size: int, *, llm: LLM | None = None) -> None:
 
     try:
         report("準備")
+        if store.is_cancelled(exam_id):
+            raise ExamCancelled()
         exam = generate.generate_exam(exam_id, size, llm=llm or GrokLLM(), report=report)
+        if store.is_cancelled(exam_id):
+            raise ExamCancelled()
         generate.attach_media(exam, report=report)
         report("保存")
         store.save_exam(exam)
+    except ExamCancelled:
+        if not store.is_cancelled(exam_id):
+            store.set_status(exam_id, "cancelled", "cancelled")
+        return
     except Exception as e:
         log.exception("generate failed exam_id=%s", exam_id)
         store.set_status(exam_id, "failed", _public_error(e))
