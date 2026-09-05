@@ -22,18 +22,29 @@ from hsk5.models import (
 )
 from hsk5.scale import PartCounts, scale_counts
 from hsk5.store import now_iso
-from hsk5.vocab import Vocab, load_vocab
+from hsk5.vocab import ALLOWED_PROPER, Vocab, load_vocab
 
 T = TypeVar("T", bound=BaseModel)
 U = TypeVar("U")
 ReportFn = Callable[[str, str], None]
+_PROPER_NAMES = tuple(sorted(ALLOWED_PROPER))
 SYSTEM = (
     "You write HSK 2.0 Level 5 (五级) exam items. Use only the provided vocabulary "
-    "plus allowed names 小王/小李/小张/王明/李华 and digits. Simplified Chinese. "
+    "plus allowed Chinese person names from the prompt and digits. Simplified Chinese. "
+    "Vary who appears: do not reuse the same person across items when possible. "
     "Difficulty matches official HSK5. Four choices A-D, one correct. "
     "Each item must be a new situation, not a rewrite of a previous one. "
     "Do not include English. Output JSON that matches the schema."
 )
+
+
+def _names_for_slot(index: int, k: int = 2) -> list[str]:
+    n = len(_PROPER_NAMES)
+    if n == 0:
+        return []
+    k = min(k, n)
+    start = (index * k) % n
+    return [_PROPER_NAMES[(start + j) % n] for j in range(k)]
 
 
 def gen_concurrency() -> int:
@@ -169,7 +180,12 @@ def _transcript(lines: list[SpeakerLine], question: str) -> str:
 
 
 def _slot_user(vocab: Vocab, extra: str, avoid: list[str], index: int, total: int, *, count: int = 1) -> str:
-    slotted = f"{extra} This is empty slot {index + 1} of {total}; invent a distinct situation for this slot only."
+    names = "、".join(_names_for_slot(index))
+    slotted = (
+        f"{extra} This is empty slot {index + 1} of {total}; invent a distinct situation for this slot only. "
+        f"If the item needs person names, use only these for this slot: {names}. "
+        "Do not invent other names."
+    )
     return _user(count, vocab, slotted, avoid)
 
 
