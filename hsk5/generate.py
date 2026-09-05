@@ -250,7 +250,7 @@ def planned_steps(counts: PartCounts) -> list[str]:
         steps.append("作文の課題")
     if counts.listening_total:
         steps.append("音声合成")
-    if counts.writing_p2 >= 2:
+    if counts.writing_p2 >= 1:
         steps.append("看图の画像")
     steps.append("保存")
     return steps
@@ -428,7 +428,8 @@ def generate_exam(exam_id: str, size: int, *, llm: LLM | None = None, report: Re
         return SentenceOrderItem(id=new_id(), words=list(raw.words), gold=raw.gold), _theme(raw.gold)
 
     def build_essay(i: int, n: int, avoid: list[str]) -> tuple[EssayItem, str]:
-        if i == 0:
+        # Last writing_p2 slot is always 看图 so mid sizes (wp2==1, e.g. 50%) still get it.
+        if i < n - 1:
             kw = _parse(
                 llm,
                 KeywordsOut,

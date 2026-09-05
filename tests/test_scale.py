@@ -72,3 +72,9 @@ def test_size_rejects_out_of_range() -> None:
             pass
         else:
             raise AssertionError(bad)
+
+
+def test_picture_essay_slot_at_size_50() -> None:
+    # size 50 has writing_p2==1; that single slot must be treated as 看图 in generation.
+    c = scale_counts(50)
+    assert c.writing_p2 >= 1

@@ -68,10 +68,18 @@ def make_exam(size: int = 10, exam_id: str | None = None) -> Exam:
         for _ in range(counts.writing_p1)
     ]
     essays: list[EssayItem] = []
-    if counts.writing_p2 >= 1:
-        essays.append(EssayItem(id=new_id(), kind="keywords", required_words=["环境", "保护", "责任", "习惯", "影响"]))
-    if counts.writing_p2 >= 2:
-        essays.append(EssayItem(id=new_id(), kind="picture", image_name="writing.png", image_prompt="park"))
+    # Match generate.build_essay: last writing_p2 slot is 看图; earlier are keywords.
+    for i in range(counts.writing_p2):
+        if i < counts.writing_p2 - 1:
+            essays.append(
+                EssayItem(
+                    id=new_id(),
+                    kind="keywords",
+                    required_words=["环境", "保护", "责任", "习惯", "影响"],
+                )
+            )
+        else:
+            essays.append(EssayItem(id=new_id(), kind="picture", image_name="writing.png", image_prompt="park"))
     return Exam(
         id=eid,
         size=size,
