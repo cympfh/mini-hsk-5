@@ -23,6 +23,7 @@ from hsk5.models import (
 )
 from hsk5.scale import PartCounts, counts_for
 from hsk5.store import now_iso
+from hsk5.exemplars import format_exemplars
 from hsk5.vocab import ALLOWED_PROPER, Vocab, load_vocab
 
 T = TypeVar("T", bound=BaseModel)
@@ -31,10 +32,15 @@ ReportFn = Callable[[str, str], None]
 SYSTEM = (
     "You write HSK 2.0 Level 5 (五级) exam items. Use only the provided vocabulary "
     "plus allowed Chinese person names from the prompt and digits. Simplified Chinese. "
+    "Write natural everyday Chinese like official HSK5: idiomatic collocations, normal "
+    "word order, fluent dialogue; avoid stiff, literal, or machine-translated phrasing. "
     "Vary who appears: do not reuse the same person across items when possible. "
     "Difficulty matches official HSK5. Four choices A-D, one correct. "
     "Each item must be a new situation, not a rewrite of a previous one. "
-    "Do not include English. Output JSON that matches the schema."
+    "When style exemplars are given, match their naturalness and diversity of situations, "
+    "but invent original content — never copy exemplar plots or wording. "
+    "Do not include English in item text (except picture image prompts when asked). "
+    "Output JSON that matches the schema."
 )
 
 
@@ -195,6 +201,7 @@ def _slot_user(
     *,
     count: int = 1,
     name_pool: list[str] | None = None,
+    part: str | None = None,
 ) -> str:
     names = "、".join(_names_for_slot(index, pool=name_pool))
     slotted = (
@@ -202,6 +209,10 @@ def _slot_user(
         f"If the item needs person names, use only these for this slot: {names}. "
         "Do not invent other names."
     )
+    if part:
+        ex = format_exemplars(part)
+        if ex:
+            slotted = f"{slotted}\n{ex}"
     return _user(count, vocab, slotted, avoid)
 
 
@@ -357,6 +368,7 @@ def generate_exam(
                 i,
                 n,
                 name_pool=name_pool,
+                part="listening_p1",
             ),
         )
         return _listening_pair(
@@ -380,6 +392,7 @@ def generate_exam(
                 i,
                 n,
                 name_pool=name_pool,
+                part="listening_p2",
             ),
         )
         if not raw.questions:
@@ -400,7 +413,13 @@ def generate_exam(
             ClozePassageOut,
             vocab,
             _slot_user(
-                vocab, "One short cloze passage with exactly one blank marked ____.", avoid, i, n, name_pool=name_pool
+                vocab,
+                "One short cloze passage with exactly one blank marked ____.",
+                avoid,
+                i,
+                n,
+                name_pool=name_pool,
+                part="reading_p1",
             ),
         )
         if not passage.blanks:
@@ -422,7 +441,13 @@ def generate_exam(
             ReadingShortOut,
             vocab,
             _slot_user(
-                vocab, "One short paragraph. Choose the statement that matches.", avoid, i, n, name_pool=name_pool
+                vocab,
+                "One short paragraph. Choose the statement that matches.",
+                avoid,
+                i,
+                n,
+                name_pool=name_pool,
+                part="reading_p2",
             ),
         )
         item = McqItem(
@@ -447,6 +472,7 @@ def generate_exam(
                 i,
                 n,
                 name_pool=name_pool,
+                part="reading_p3",
             ),
         )
         if not passage.questions:
@@ -474,6 +500,7 @@ def generate_exam(
                 i,
                 n,
                 name_pool=name_pool,
+                part="writing_p1",
             ),
         )
         return SentenceOrderItem(id=new_id(), words=list(raw.words), gold=raw.gold), _theme(raw.gold)
@@ -483,7 +510,12 @@ def generate_exam(
             llm,
             KeywordsOut,
             vocab,
-            _user(5, vocab, "Five related HSK5 words for an 80-character essay.", avoid),
+            _user(
+                5,
+                vocab,
+                "Five related HSK5 words for an 80-character essay.\n" + format_exemplars("writing_keywords"),
+                avoid,
+            ),
         )
         return EssayItem(id=new_id(), kind="keywords", required_words=list(kw.words)[:5]), _theme(*kw.words)
 
@@ -492,7 +524,13 @@ def generate_exam(
             llm,
             PictureOut,
             vocab,
-            _user(1, vocab, "English photo prompt of a simple everyday scene. No text in the image.", avoid),
+            _user(
+                1,
+                vocab,
+                "English photo prompt of a simple everyday scene. No text in the image.\n"
+                + format_exemplars("writing_picture"),
+                avoid,
+            ),
         )
         img = f"writing-{i + 1}.png"
         return (
