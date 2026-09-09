@@ -34,7 +34,11 @@ SYSTEM = (
     "plus allowed Chinese person names from the prompt and digits. Simplified Chinese. "
     "Write natural everyday Chinese like official HSK5: idiomatic collocations, normal "
     "word order, fluent dialogue; avoid stiff, literal, or machine-translated phrasing. "
-    "Vary who appears: do not reuse the same person across items when possible. "
+    "One scene and one purpose only. Do not stuff unrelated allowed words into the item; "
+    "if a word does not belong in the scene, omit it. "
+    "Use only the person names assigned to this slot; do not reuse the same person across items. "
+    "Choices are wrong details of the same scene, never a different episode. "
+    "Long passages must not end with a moral slogan or proverb. "
     "Difficulty matches official HSK5. Four choices A-D, one correct. "
     "Each item must be a new situation, not a rewrite of a previous one. "
     "When style exemplars are given, match their naturalness and diversity of situations, "
@@ -363,7 +367,7 @@ def generate_exam(
             vocab,
             _slot_user(
                 vocab,
-                "One short two-person dialogue. One question. Third person asks.",
+                "One everyday scene, one point. Two short natural lines, then one question. Do not pack extra topics. Choices are about that point only.",
                 avoid,
                 i,
                 n,
@@ -387,7 +391,7 @@ def generate_exam(
             vocab,
             _slot_user(
                 vocab,
-                "One clip of 4-5 sentences (dialogue or monologue) with exactly one question.",
+                "One everyday scene, one point, 4-5 natural sentences, exactly one question. Do not pack extra topics. Choices are about that point only.",
                 avoid,
                 i,
                 n,
@@ -414,7 +418,7 @@ def generate_exam(
             vocab,
             _slot_user(
                 vocab,
-                "One short cloze passage with exactly one blank marked ____.",
+                "Write one short complete passage, then replace exactly one word with ____. The blank is a single word slot; filling it must make a grammatical sentence. Do not put ____ where no word fits.",
                 avoid,
                 i,
                 n,
@@ -424,6 +428,8 @@ def generate_exam(
         )
         if not passage.blanks:
             raise RuntimeError("cloze missing blank")
+        if passage.text.count("____") != 1:
+            raise RuntimeError("cloze must have exactly one blank")
         blank = passage.blanks[0]
         item = McqItem(
             id=new_id(),
@@ -442,7 +448,7 @@ def generate_exam(
             vocab,
             _slot_user(
                 vocab,
-                "One short paragraph. Choose the statement that matches.",
+                "One short paragraph about one fact. Choices are true or wrong details of that paragraph only, never another story.",
                 avoid,
                 i,
                 n,
@@ -467,7 +473,7 @@ def generate_exam(
             vocab,
             _slot_user(
                 vocab,
-                "One longer passage with exactly one multiple-choice question.",
+                "One longer passage about one situation, exactly one question. Do not end with a moral slogan. Choices stay on the same passage.",
                 avoid,
                 i,
                 n,
@@ -495,7 +501,7 @@ def generate_exam(
             vocab,
             _slot_user(
                 vocab,
-                "One sentence-reordering item. words is shuffled; gold is the correct sentence.",
+                "One grammatical sentence. words are shuffled constituents of that one sentence; gold is the sentence. Do not split into clause fragments that cannot join.",
                 avoid,
                 i,
                 n,
